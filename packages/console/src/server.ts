@@ -225,7 +225,7 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
     }
     if (method === 'POST' && path === '/verify') {
       const { phone, code, firstName, smsOptIn, homeStoreId } = await body<Record<string, string | boolean | undefined>>(req);
-      const result = members.verify(phone, code, { firstName: firstName as string, smsOptIn: Boolean(smsOptIn), homeStoreId: homeStoreId as string });
+      const result = await members.verify(phone, code, { firstName: firstName as string, smsOptIn: Boolean(smsOptIn), homeStoreId: homeStoreId as string });
       return [200, result];
     }
 
