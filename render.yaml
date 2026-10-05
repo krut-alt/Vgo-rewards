@@ -1,10 +1,10 @@
-# Render blueprint: one web service with a small disk for the data file.
-# Secrets (marked sync: false) are typed into Render's dashboard, never committed here.
+# Render blueprint for the free plan. Free servers have no lasting disk, so data is kept in a
+# free Upstash Redis database. Secrets (sync: false) are typed into Render, never committed here.
 services:
   - type: web
     name: vgo-rewards
     runtime: node
-    plan: starter
+    plan: free
     buildCommand: npm ci && npm run build
     startCommand: node dist/console/src/main.js
     healthCheckPath: /app/
@@ -13,9 +13,11 @@ services:
         value: "22"
       - key: HOST
         value: 0.0.0.0
-      - key: VGO_DATA
-        value: /var/data/console.json
       - key: VGO_ADMIN_PASSWORD
+        sync: false
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
         sync: false
       - key: TWILIO_ACCOUNT_SID
         sync: false
@@ -23,7 +25,3 @@ services:
         sync: false
       - key: TWILIO_FROM
         sync: false
-    disk:
-      name: vgo-data
-      mountPath: /var/data
-      sizeGB: 1
