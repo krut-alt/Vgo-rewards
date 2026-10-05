@@ -2,6 +2,7 @@
 // The JSON is gzipped so it stays small; saves are coalesced so only the latest copy is sent.
 import { gunzipSync, gzipSync } from 'node:zlib';
 import type { ConsoleData } from './model.js';
+import { cleanSetting } from './sms.js';
 
 export interface UpstashConfig {
   /** UPSTASH_REDIS_REST_URL, like https://xxx.upstash.io */
@@ -12,8 +13,8 @@ export interface UpstashConfig {
 }
 
 export function upstashConfigFromEnv(env: NodeJS.ProcessEnv = process.env): UpstashConfig | undefined {
-  const url = env.UPSTASH_REDIS_REST_URL?.trim();
-  const token = env.UPSTASH_REDIS_REST_TOKEN?.trim();
+  const url = cleanSetting(env.UPSTASH_REDIS_REST_URL);
+  const token = cleanSetting(env.UPSTASH_REDIS_REST_TOKEN);
   return url && token ? { url: url.replace(/\/+$/, ''), token, key: env.VGO_DATA_KEY?.trim() || undefined } : undefined;
 }
 

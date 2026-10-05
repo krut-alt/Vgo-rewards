@@ -6,7 +6,7 @@ import { upstashConfigFromEnv, upstashStore } from './remote-store.js';
 import { Repo } from './repo.js';
 import { seedData } from './seed.js';
 import { createApp } from './server.js';
-import { smsSenderFromEnv } from './sms.js';
+import { smsFromEnv } from './sms.js';
 
 const dataFile = resolve(process.env.VGO_DATA ?? 'data/console.json');
 mkdirSync(dirname(dataFile), { recursive: true });
@@ -33,9 +33,10 @@ if (!adminPassword && !['127.0.0.1', 'localhost', '::1'].includes(host)) {
 }
 // VGO_DEV_CODES=1 puts sign-in codes in the app's API response for local testing.
 // Leave it off anywhere real members sign in.
-// TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_FROM send real texts; without them codes go to the log.
-const sms = smsSenderFromEnv();
-const memberApi = new MemberApi(repo, sms.sender, () => new Date(), process.env.VGO_DEV_CODES === '1');
+// TWILIO_VERIFY_SID (with the account SID and token) uses Twilio Verify, which works on trial accounts;
+// TWILIO_FROM sends our own texts instead. Without either, codes go to the log.
+const sms = smsFromEnv();
+const memberApi = new MemberApi(repo, sms.sender, () => new Date(), process.env.VGO_DEV_CODES === '1', sms.codeService);
 createApp(repo, resolve(process.env.VGO_PUBLIC ?? 'packages/console/public'), {
   appDir: resolve(process.env.VGO_APP ?? 'packages/app/public'),
   memberApi,

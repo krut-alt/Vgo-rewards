@@ -15,7 +15,7 @@ function setup() {
 
 async function join(api: MemberApi, codeFrom: () => string, phone = '8035550199') {
   await api.requestCode(phone);
-  const res = api.verify(phone, codeFrom(), { firstName: 'Jordan', smsOptIn: true, homeStoreId: 'vgo-01' });
+  const res = await api.verify(phone, codeFrom(), { firstName: 'Jordan', smsOptIn: true, homeStoreId: 'vgo-01' });
   if (!('token' in res)) throw new Error('expected a token');
   return api.memberFor(`Bearer ${res.token}`);
 }
@@ -31,7 +31,7 @@ describe('member sign-in', () => {
   it('asks a new number for a name instead of creating a blank member', async () => {
     const { api, codeFrom } = setup();
     await api.requestCode('(803) 555-0100');
-    expect(api.verify('8035550100', codeFrom())).toEqual({ needsSignup: true });
+    expect(await api.verify('8035550100', codeFrom())).toEqual({ needsSignup: true });
   });
 
   it('rejects wrong codes and locks after five tries', async () => {
@@ -39,8 +39,8 @@ describe('member sign-in', () => {
     await api.requestCode('8035550101');
     const right = codeFrom();
     const wrong = right === '000000' ? '111111' : '000000';
-    for (let i = 0; i < 5; i++) expect(() => api.verify('8035550101', wrong)).toThrow(/does not match/);
-    expect(() => api.verify('8035550101', right)).toThrow(/Too many tries/);
+    for (let i = 0; i < 5; i++) await expect(api.verify('8035550101', wrong)).rejects.toThrow(/does not match/);
+    await expect(api.verify('8035550101', right)).rejects.toThrow(/Too many tries/);
   });
 
   it('limits how many codes one number can request', async () => {
@@ -52,7 +52,7 @@ describe('member sign-in', () => {
   it('refuses unknown or signed-out tokens', async () => {
     const { api, codeFrom } = setup();
     await api.requestCode('8035550103');
-    const res = api.verify('8035550103', codeFrom(), { firstName: 'Sam' }) as { token: string };
+    const res = await api.verify('8035550103', codeFrom(), { firstName: 'Sam' }) as { token: string };
     expect(() => api.memberFor('Bearer nope')).toThrow(/sign in/);
     api.signOut(`Bearer ${res.token}`);
     expect(() => api.memberFor(`Bearer ${res.token}`)).toThrow(/sign in/);

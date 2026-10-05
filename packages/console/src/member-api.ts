@@ -7,6 +7,7 @@ import { lastDay, memberLine, rewardLabel, targetLabel } from './labels.js';
 import { shortDate } from './dates.js';
 import type { AppAuth, ConsoleMember, ConsoleRule, ConsoleStore } from './model.js';
 import { ConsoleError, type Repo } from './repo.js';
+import type { CodeService } from './sms.js';
 
 /** Sends the sign-in code. See sms.ts for Twilio; without it, codes go to the server log. */
 export type SmsSender = (phone: string, text: string) => void | Promise<void>;
@@ -49,6 +50,8 @@ export class MemberApi {
     private readonly clock: () => Date = () => new Date(),
     /** Returns the code in the API response; for local testing only, never in production. */
     private readonly exposeCodes = false,
+    /** When set (Twilio Verify), it writes, sends and checks the codes instead of this class. */
+    private readonly codeService?: CodeService,
   ) {}
 
   private get auth(): AppAuth {
@@ -68,9 +71,9 @@ export class MemberApi {
     const prev = this.auth.codes[phone];
     const recent = (prev?.sentAt ?? []).filter((t) => now - Date.parse(t) < 3_600_000);
     if (recent.length >= MAX_CODES_PER_HOUR) throw new ConsoleError('Too many codes sent. Try again in an hour.', 429);
-    const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+    const code = this.codeService ? undefined : String(randomInt(0, 1_000_000)).padStart(6, '0');
     this.auth.codes[phone] = {
-      hash: sha(`${phone}:${code}`),
+      hash: code ? sha(`${phone}:${code}`) : '',
       expiresAt: new Date(now + CODE_MINUTES * 60_000).toISOString(),
       attempts: 0,
       sentAt: [...recent, new Date(now).toISOString()],
@@ -78,7 +81,8 @@ export class MemberApi {
     this.repo.save();
     const name = this.repo.data.branding.programName;
     try {
-      await this.sendSms(phone, `${code} is your ${name} code. It expires in ${CODE_MINUTES} minutes.`);
+      if (this.codeService) await this.codeService.start(phone);
+      else await this.sendSms(phone, `${code} is your ${name} code. It expires in ${CODE_MINUTES} minutes.`);
     } catch (err) {
       // A text that never went out shouldn't count toward the hourly limit or leave a usable code.
       if (prev) this.auth.codes[phone] = prev;
@@ -86,24 +90,31 @@ export class MemberApi {
       this.repo.save();
       throw err;
     }
-    return this.exposeCodes ? { sent: true, devCode: code } : { sent: true };
+    return this.exposeCodes && code ? { sent: true, devCode: code } : { sent: true };
   }
 
   /**
    * Checks the code. A known phone signs in; a new phone joins when `signup` is given,
    * otherwise the app is told to ask for a first name first.
    */
-  verify(
+  async verify(
     rawPhone: unknown,
     code: unknown,
     signup?: { firstName?: string; smsOptIn?: boolean; homeStoreId?: string },
-  ): { token: string; isNew: boolean } | { needsSignup: true } {
+  ): Promise<{ token: string; isNew: boolean } | { needsSignup: true }> {
     const phone = digits(rawPhone);
     const entry = this.auth.codes[phone];
     const now = this.clock().getTime();
     if (!entry || Date.parse(entry.expiresAt) < now) throw new ConsoleError('That code has expired. Send a new one.', 400);
     if (entry.attempts >= MAX_ATTEMPTS) throw new ConsoleError('Too many tries. Send a new code.', 429);
-    if (sha(`${phone}:${String(code ?? '').trim()}`) !== entry.hash) {
+    const given = String(code ?? '').trim();
+    // Verify approves a code only once; keep its hash so the sign-up step can repeat the same code.
+    const ok = entry.hash ? sha(`${phone}:${given}`) === entry.hash : await this.codeService!.check(phone, given);
+    if (ok && !entry.hash) {
+      entry.hash = sha(`${phone}:${given}`);
+      this.repo.save();
+    }
+    if (!ok) {
       entry.attempts += 1;
       this.repo.save();
       throw new ConsoleError('That code does not match. Check the text and try again.', 400);
