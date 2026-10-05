@@ -42,6 +42,12 @@ export interface ConsoleMember {
   punches: Record<string, number>;
   joinedAt: string;
   lastVisitAt?: string;
+  /** Agreed to offer texts at sign-up; can be changed in the app. */
+  smsOptIn?: boolean;
+  /** Offers the member added to their card in the app. */
+  clippedRuleIds?: string[];
+  /** Points redemptions the member picked in the app for their next visit. */
+  nextVisitRedeem?: string[];
 }
 
 export interface Branding {
@@ -74,6 +80,12 @@ export interface LedgerEntry {
   sample?: boolean;
 }
 
+/** Member sign-in state for the app. Codes and tokens are stored hashed. */
+export interface AppAuth {
+  codes: Record<string, { hash: string; expiresAt: string; attempts: number; sentAt: string[] }>;
+  sessions: Record<string, { memberId: string; expiresAt: string }>;
+}
+
 export interface ChangeEntry {
   at: string;
   userId: string;
@@ -90,6 +102,7 @@ export interface ConsoleData {
   branding: Branding;
   settings: ProgramSettings;
   history: ChangeEntry[];
+  auth?: AppAuth;
   /** When the pilot started, for "day 45 of 90" on Results. */
   pilot: { storeId: StoreId; startedOn: string; days: number };
 }

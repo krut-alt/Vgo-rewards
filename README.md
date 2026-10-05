@@ -12,7 +12,10 @@ Pilot: one unbranded Verifone Commander store, then the remaining Verifone and G
   groups, members, branding and pilot results. Includes a plain-English rule drafter that turns
   "Earn 2x points on premium fuel on weekends at SC stores until Dec 31" into a paused rule.
   The POS link calls `POST /api/pos/preview` before payment and `POST /api/pos/transactions` after.
-- **Customer app** (later): sign-up, offers, points and rewards.
+- **Customer app** (`packages/app`, served at `/app/`): members join with their phone number
+  and a texted code, then see points, punch cards and offers, add offers to their card, pick a
+  points reward for their next fill-up, and show their phone number or barcode at checkout.
+  It installs from the browser for now; store apps can wrap the same screens later.
 - **POS link** (rented): a certified Conexxus loyalty connection to Commander and Passport
   calls the engine for each transaction and applies discounts at the pump and register.
 
@@ -36,8 +39,11 @@ discounts and earn rules stay with the jobber (`permissions.ts`).
 npm install
 npm run typecheck
 npm test
-npm run console   # http://localhost:4310
+npm run console   # console at http://localhost:4310, member app at /app/
 ```
+
+Sign-in codes are written to the server log until an SMS provider is connected.
+`VGO_DEV_CODES=1 npm run console` also shows the code in the app, for local testing only.
 
 The console keeps its data in `data/console.json` (set `VGO_DATA` to move it). A new console
 starts with the 13 stores, the pilot rules from the program design and about 45 days of

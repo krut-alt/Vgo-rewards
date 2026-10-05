@@ -80,6 +80,8 @@ export interface Rule {
    */
   stackingGroup?: string;
   priority?: number;
+  /** The member has to add it to their card in the app before it applies. */
+  requiresClip?: boolean;
   /** Most discount (cents) this rule may give in a calendar month across all members. */
   monthlyBudgetCents?: number;
   fundedBy: FundedBy;
@@ -119,6 +121,8 @@ export interface Member {
   pointsBalance: number;
   visitCount: number;
   punches: Record<string, number>;
+  /** Offers the member added to their card in the app. */
+  clippedRuleIds?: string[];
 }
 
 /** How often each rule was already used by this member, per period. */

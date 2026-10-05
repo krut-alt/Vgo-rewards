@@ -49,6 +49,12 @@ describe('scope', () => {
     expect(evaluate([groupOffer], other, tx({ items }), member()).discounts).toHaveLength(1);
   });
 
+  it('applies a card offer only once the member added it', () => {
+    const clip = { ...offer, requiresClip: true };
+    expect(evaluate([clip], pilot, tx({ items }), member()).discounts).toHaveLength(0);
+    expect(evaluate([clip], pilot, tx({ items }), member({ clippedRuleIds: ['sandwich'] })).discounts).toHaveLength(1);
+  });
+
   it('ignores paused, draft and retired rules', () => {
     for (const status of ['paused', 'draft', 'retired'] as const) {
       expect(evaluate([{ ...offer, status }], pilot, tx({ items }), member()).discounts).toHaveLength(0);

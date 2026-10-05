@@ -1,6 +1,7 @@
 // Starts the console: `npm run console`, then open http://localhost:4310.
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { logSender, MemberApi } from './member-api.js';
 import { Repo } from './repo.js';
 import { seedData } from './seed.js';
 import { createApp } from './server.js';
@@ -10,6 +11,12 @@ mkdirSync(dirname(dataFile), { recursive: true });
 const repo = Repo.open(dataFile, () => seedData());
 const port = Number(process.env.PORT ?? 4310);
 const host = process.env.HOST ?? '127.0.0.1';
-createApp(repo, resolve(process.env.VGO_PUBLIC ?? 'packages/console/public')).listen(port, host, () => {
-  console.log(`VGO Rewards console: http://localhost:${port}  (data: ${dataFile})`);
+// VGO_DEV_CODES=1 puts sign-in codes in the app's API response for local testing.
+// Leave it off anywhere real members sign in.
+const memberApi = new MemberApi(repo, logSender, () => new Date(), process.env.VGO_DEV_CODES === '1');
+createApp(repo, resolve(process.env.VGO_PUBLIC ?? 'packages/console/public'), {
+  appDir: resolve(process.env.VGO_APP ?? 'packages/app/public'),
+  memberApi,
+}).listen(port, host, () => {
+  console.log(`VGO Rewards console: http://localhost:${port}   member app: http://localhost:${port}/app/   (data: ${dataFile})`);
 });

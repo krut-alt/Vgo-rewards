@@ -120,6 +120,7 @@ function rules(today: string, pilotStart: string): ConsoleRule[] {
       ],
       effect: { type: 'itemDiscount', categories: ['sandwiches'], centsOff: 100, maxQty: 1 },
       perMemberLimit: { count: 1, period: 'day' },
+      requiresClip: true,
       memberText: 'Buy 8+ gallons and a sandwich in the same visit.',
     },
     {
@@ -142,6 +143,7 @@ function rules(today: string, pilotStart: string): ConsoleRule[] {
       scope: { kind: 'all' },
       fundedBy: 'manufacturer',
       effect: { type: 'itemDiscount', categories: ['energy'], centsOff: 50, maxQty: 2 },
+      requiresClip: true,
       memberText: 'Paid for by the brand through Skupos.',
     },
   ];
@@ -192,6 +194,8 @@ function addSampleActivity(repo: Repo, pilotStart: string, days: number): void {
         visitCount: 0,
         punches: {},
         joinedAt: new Date(localMidnight(ymd)).toISOString(),
+        smsOptIn: rand() < 0.7,
+        clippedRuleIds: rand() < 0.6 ? ['sandwich-fillup'] : [],
       });
       memberIds.push(`sample-${seq}`);
     }

@@ -111,6 +111,7 @@ export function ruleProblems(rule: Partial<ConsoleRule>, storeIds: string[], gro
   }
   const l = rule.perMemberLimit;
   if (l && (!isInt(l.count, 1) || !['day', 'week', 'month', 'lifetime'].includes(l.period))) p.push('Uses per member is not valid.');
+  if (rule.requiresClip !== undefined && typeof rule.requiresClip !== 'boolean') p.push('Add-to-card setting is not valid.');
   if (rule.monthlyBudgetCents !== undefined && !isInt(rule.monthlyBudgetCents, 1)) p.push('Budget cap must be at least 1¢.');
   return p;
 }
