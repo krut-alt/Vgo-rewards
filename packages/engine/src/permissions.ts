@@ -38,6 +38,7 @@ export function ruleViolations(rule: Rule, actor: Actor, policy: StorePolicy): s
     problems.push('Store managers can only target their own store.');
   if (e.type === 'fuelDiscount') problems.push('Fuel discounts are set by the jobber.');
   if (e.type.startsWith('points')) problems.push('Earn rules are set by the jobber.');
+  if (e.type === 'itemDiscount' && e.costPoints) problems.push('Points redemptions are set by the jobber.');
   if (e.type === 'itemDiscount' && (e.centsOff ?? 0) > policy.maxStoreDiscountCents)
     problems.push(`Discount is above the store limit of ${policy.maxStoreDiscountCents} cents.`);
   if (e.type === 'basketDiscount' && e.centsOff > policy.maxStoreDiscountCents)
