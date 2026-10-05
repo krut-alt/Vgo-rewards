@@ -21,6 +21,7 @@ import type {
   ProgramSettings,
   StoreGroup,
 } from './model.js';
+import { migrate } from './migrate.js';
 import { ruleProblems } from './validate.js';
 
 export class ConsoleError extends Error {
@@ -63,11 +64,16 @@ function periodStart(ymd: string, period: Period): string {
 export { withoutNulls };
 
 export class Repo {
+  /** True when loading applied data updates that still need saving. */
+  readonly migrated: boolean;
+
   constructor(
     public data: ConsoleData,
     private readonly persist: (data: ConsoleData) => void = () => {},
     private readonly clock: () => Date = () => new Date(),
-  ) {}
+  ) {
+    this.migrated = migrate(data);
+  }
 
   static open(file: string, seed: () => ConsoleData): Repo {
     const data = existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as ConsoleData) : seed();
@@ -76,7 +82,7 @@ export class Repo {
       writeFileSync(tmp, JSON.stringify(d));
       renameSync(tmp, file);
     });
-    if (!existsSync(file)) repo.save();
+    if (!existsSync(file) || repo.migrated) repo.save();
     return repo;
   }
 
@@ -206,6 +212,18 @@ export class Repo {
   member(id: string): ConsoleMember {
     const m = this.data.members.find((x) => x.id === id);
     if (!m) throw new ConsoleError('Member not found.', 404);
+    return m;
+  }
+
+  /**
+   * Finds a member by what the customer gave at checkout: the phone number typed on the PIN pad
+   * or the app barcode (which carries the same number). A leading US 1 is ignored.
+   */
+  memberByLoyaltyId(raw: unknown): ConsoleMember {
+    let digits = String(raw ?? '').replace(/\D/g, '');
+    if (digits.length === 11 && digits.startsWith('1')) digits = digits.slice(1);
+    const m = digits.length === 10 ? this.data.members.find((x) => x.phone === digits) : undefined;
+    if (!m) throw new ConsoleError('No member with that phone number.', 404);
     return m;
   }
 

@@ -202,14 +202,12 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
     }
 
     // What the POS link calls. `preview` answers "what does this member get" before payment;
-    // `transactions` records the finished sale.
-    if (method === 'POST' && path === '/pos/preview') {
-      const { tx, memberId } = await body<{ tx: Transaction; memberId?: string }>(req);
-      return [200, repo.preview(withLocalTime(tx), memberId)];
-    }
-    if (method === 'POST' && path === '/pos/transactions') {
-      const { tx, memberId } = await body<{ tx: Transaction; memberId?: string }>(req);
-      return [201, repo.recordTransaction(withLocalTime(tx), memberId)];
+    // `transactions` records the finished sale. The member is given either as our `memberId` or as
+    // `loyaltyId`: the phone number typed on the PIN pad or the scanned app barcode.
+    if (method === 'POST' && (path === '/pos/preview' || path === '/pos/transactions')) {
+      const { tx, memberId, loyaltyId } = await body<{ tx: Transaction; memberId?: string; loyaltyId?: string }>(req);
+      const id = memberId || (loyaltyId ? repo.memberByLoyaltyId(loyaltyId).id : undefined);
+      return path === '/pos/preview' ? [200, repo.preview(withLocalTime(tx), id)] : [201, repo.recordTransaction(withLocalTime(tx), id)];
     }
     throw new ConsoleError('Not found.', 404);
   }

@@ -103,6 +103,8 @@ export interface ConsoleData {
   settings: ProgramSettings;
   history: ChangeEntry[];
   auth?: AppAuth;
+  /** Data updates already applied to this file; see migrate.ts. */
+  migrations?: string[];
   /** When the pilot started, for "day 45 of 90" on Results. */
   pilot: { storeId: StoreId; startedOn: string; days: number };
 }

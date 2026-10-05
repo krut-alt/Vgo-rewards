@@ -17,7 +17,7 @@ if (upstash) {
   const store = upstashStore(upstash);
   const saved = await store.load();
   repo = new Repo(saved ?? seedData(), (d) => store.save(d));
-  if (!saved) repo.save();
+  if (!saved || repo.migrated) repo.save();
   // Free hosts stop idle servers; finish the last save before exiting.
   process.once('SIGTERM', () => void store.idle().finally(() => process.exit(0)));
 } else {

@@ -10,7 +10,7 @@ export const CATEGORIES = [
   { id: 'candy', label: 'Candy', words: ['candy', 'candy bar', 'candy bars'] },
   { id: 'energy', label: 'Energy drinks', words: ['energy drink', 'energy drinks', 'energy'] },
   { id: 'cold-drinks', label: 'Cold drinks', words: ['cold drink', 'cold drinks', 'water', 'bottled drink', 'bottled drinks'] },
-  { id: 'beer', label: 'Beer and wine', words: ['beer', 'wine'] },
+  { id: 'beer', label: 'Alcohol', words: ['beer', 'wine', 'alcohol', 'liquor'] },
   { id: 'ice', label: 'Ice', words: ['ice', 'bag of ice'] },
   { id: 'car-wash', label: 'Car wash', words: ['car wash', 'carwash', 'wash'] },
   { id: 'tobacco', label: 'Tobacco', words: ['tobacco', 'cigarettes', 'vape'] },
@@ -26,7 +26,7 @@ export const FUEL_GRADES = [
 ] as const;
 
 /** Inside sales that never earn points by default. */
-export const NO_EARN_CATEGORIES = ['tobacco', 'lottery', 'gift-cards'];
+export const NO_EARN_CATEGORIES = ['tobacco', 'beer', 'lottery', 'gift-cards'];
 
 export function categoryLabel(id: string): string {
   return CATEGORIES.find((c) => c.id === id)?.label ?? id;

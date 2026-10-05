@@ -23,7 +23,7 @@ export function ruleChecks(repo: Repo, rule: ConsoleRule, actor: Actor): { block
 
   if (rule.fundedBy === 'store' || rule.fundedBy === 'split') {
     const off = e.type === 'itemDiscount' ? (e.centsOff ?? 0) : e.type === 'basketDiscount' ? e.centsOff : 0;
-    if (off)
+    if (off && settings.maxStoreDiscountCents > 0)
       checks.push(
         off <= settings.maxStoreDiscountCents
           ? { ok: true, text: `Within the store's max discount of ${money(settings.maxStoreDiscountCents)}` }

@@ -60,8 +60,8 @@ describe('console API', () => {
     expect(data.display.runs).toBe('Always on');
   });
 
-  it('flags a store-funded discount above the store max in checks', async () => {
-    const { data } = await call('POST', '/rules/check', {
+  it('flags a store-funded discount above the store max in checks, when a max is set', async () => {
+    const check = () => call('POST', '/rules/check', {
       name: 'Big deal',
       section: 'offer',
       status: 'draft',
@@ -70,7 +70,10 @@ describe('console API', () => {
       fundedBy: 'store',
       effect: { type: 'basketDiscount', centsOff: 500 },
     });
-    expect(data.checks).toContainEqual({ ok: false, text: "Above the store's max discount of $2" });
+    expect((await check()).data.checks.some((c: { text: string }) => /max discount/.test(c.text))).toBe(false); // no cap by default
+    repo.data.settings.maxStoreDiscountCents = 200;
+    expect((await check()).data.checks).toContainEqual({ ok: false, text: "Above the store's max discount of $2" });
+    repo.data.settings.maxStoreDiscountCents = 0;
   });
 
   it('records a POS transaction and updates the member', async () => {
@@ -83,6 +86,18 @@ describe('console API', () => {
     const { data: after } = await call('GET', `/members/${m.id}`);
     expect(after.member).toMatchObject({ visitCount: 1, pointsBalance: 13, punches: { 'coffee-fountain': 1 } });
     expect((await call('POST', '/pos/transactions', { tx, memberId: m.id })).status).toBe(409);
+  });
+
+  it('finds the member from the phone number or barcode the POS sends', async () => {
+    const { data: m } = await call('POST', '/members', { name: 'Pin Pad', phone: '803-555-0177' });
+    const tx = { id: 'pos-3', storeId: 'vgo-01', at: '2026-10-05T16:00:00Z', items: [], fuel: { grade: 'regular', gallons: 10, pricePerGallonCents: 309 } };
+    const preview = await call('POST', '/pos/preview', { tx, loyaltyId: '18035550177' });
+    expect(preview.data.appliedRuleIds).toContain('welcome');
+    const { status } = await call('POST', '/pos/transactions', { tx, loyaltyId: '8035550177' });
+    expect(status).toBe(201);
+    expect((await call('GET', `/members/${m.id}`)).data.member.visitCount).toBe(1);
+    const unknown = await call('POST', '/pos/preview', { tx: { ...tx, id: 'pos-4' }, loyaltyId: '8035550000' });
+    expect(unknown).toMatchObject({ status: 404, data: { error: 'No member with that phone number.' } });
   });
 
   it('refuses member transactions at stores without loyalty', async () => {
@@ -112,5 +127,22 @@ describe('results', () => {
     expect(res.gallonsPerVisit.member).toBeGreaterThan(res.gallonsPerVisit.nonMember);
     r.clearSampleData(ADMIN);
     expect(computeResults(r.data, 'pilot', now)).toMatchObject({ sample: false, membersEnrolled: 0 });
+  });
+});
+
+describe('data updates on load', () => {
+  it('excludes alcohol from points and removes the store cap on older data, once', async () => {
+    const { migrate } = await import('../src/migrate.js');
+    const old = seedData(now);
+    delete old.migrations;
+    const earn = old.rules.find((r) => r.id === 'earn-inside')!;
+    if (earn.effect.type === 'pointsPerDollar') earn.effect.excludeCategories = ['tobacco', 'lottery', 'gift-cards'];
+    old.settings.maxStoreDiscountCents = 200;
+    expect(migrate(old)).toBe(true);
+    expect(earn.effect).toMatchObject({ excludeCategories: ['tobacco', 'lottery', 'gift-cards', 'beer'] });
+    expect(old.settings.maxStoreDiscountCents).toBe(0);
+    old.settings.maxStoreDiscountCents = 300; // changed in the portal later
+    expect(migrate(old)).toBe(false);
+    expect(old.settings.maxStoreDiscountCents).toBe(300);
   });
 });
