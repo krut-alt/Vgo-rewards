@@ -83,6 +83,8 @@ function conditionProblems(c: Condition): string[] {
       return isStrings(c.tags) && c.tags.length ? [] : ['Choose a member tag.'];
     case 'firstVisit':
       return [];
+    case 'birthday':
+      return ['day', 'week', 'month'].includes(c.window) ? [] : ['Choose the birthday window.'];
     default:
       return ['Unknown qualifier.'];
   }
@@ -110,7 +112,7 @@ export function ruleProblems(rule: Partial<ConsoleRule>, storeIds: string[], gro
       p.push('Hours must run from earlier to later in the same day.');
   }
   const l = rule.perMemberLimit;
-  if (l && (!isInt(l.count, 1) || !['day', 'week', 'month', 'lifetime'].includes(l.period))) p.push('Uses per member is not valid.');
+  if (l && (!isInt(l.count, 1) || !['day', 'week', 'month', 'year', 'lifetime'].includes(l.period))) p.push('Uses per member is not valid.');
   if (rule.requiresClip !== undefined && typeof rule.requiresClip !== 'boolean') p.push('Add-to-card setting is not valid.');
   if (rule.headline !== undefined && (typeof rule.headline !== 'string' || rule.headline.length > 28)) p.push('Keep the promo headline to 28 characters.');
   if (rule.artwork !== undefined && (!rule.artwork || typeof rule.artwork.mediaId !== 'string')) p.push('Artwork is not valid.');

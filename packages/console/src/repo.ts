@@ -56,6 +56,8 @@ function periodStart(ymd: string, period: Period): string {
       return addDays(ymd, -new Date(`${ymd}T12:00:00Z`).getUTCDay());
     case 'month':
       return `${ymd.slice(0, 7)}-01`;
+    case 'year':
+      return `${ymd.slice(0, 4)}-01-01`;
     case 'lifetime':
       return '';
   }

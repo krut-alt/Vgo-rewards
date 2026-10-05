@@ -73,6 +73,7 @@ const ICONS = {
   pump: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16"/><path d="M3 21h12"/><path d="M4 10h10"/><path d="M14 8h2a2 2 0 0 1 2 2v6a1.5 1.5 0 0 0 3 0V9l-3-3"/></svg>',
   pin: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>',
   check: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>',
+  cake: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8"/><path d="M4 16s.5-1 2-1 2.5 2 4 2 2.5-2 4-2 2.5 2 4 2 2-1 2-1"/><path d="M2 21h20"/><path d="M7 8v3M12 8v3M17 8v3"/><path d="M7 4h.01M12 4h.01M17 4h.01"/></svg>',
   bell: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
 };
 
@@ -281,6 +282,33 @@ function offerCard(o, onChange) {
   );
 }
 
+/** The birthday reward on home: ready to use, coming up, or a nudge to add a birthday. */
+function birthdayCard(b, m) {
+  if (!b) return null;
+  if (b.state === 'add-birthday')
+    return h(
+      'section',
+      { class: 'card row bday-nudge' },
+      h('div', { class: 'icon-tile' }, svg(ICONS.cake)),
+      h('div', { class: 'grow' }, h('span', { class: 'title', style: 'font-size:18px' }, 'Get a birthday treat'), h('span', { class: 'sub' }, `Add your birthday and we’ll have ${b.name.replace(/^Birthday treat:\s*/i, 'a ').toLowerCase()} waiting.`)),
+      h('a', { class: 'pill-btn', href: '#/account' }, 'Add'),
+    );
+  if (b.state === 'coming')
+    return h(
+      'section',
+      { class: 'card row' },
+      h('div', { class: 'icon-tile' }, svg(ICONS.cake)),
+      h('div', { class: 'grow' }, h('span', { class: 'ready', style: 'color:var(--muted)' }, 'Birthday treat'), h('span', { class: 'title', style: 'font-size:18px' }, b.name.replace(/^Birthday treat:\s*/i, '')), h('span', { class: 'sub' }, `Unlocks ${b.on}.`)),
+    );
+  const o = b.offer;
+  return h(
+    'article',
+    { class: 'promo bday' },
+    h('div', { class: 'art-wrap' }, o.imageUrl ? artFrame(o) : h('div', { class: 'art poster birthday' }, h('span', { class: 'poster-text' }, `Happy birthday, ${m.firstName}!`), h('span', { class: 'confetti', 'aria-hidden': 'true' }))),
+    h('div', { class: 'promo-body' }, h('span', { class: 'kicker' }, 'Your birthday treat'), h('span', { class: 'title' }, o.name), h('span', { class: 'sub' }, o.line), offerAction(o, renderHome)),
+  );
+}
+
 /** Big swipeable banners at the top of home. */
 function featuredSlider(list) {
   if (!list.length) return null;
@@ -350,6 +378,7 @@ async function renderHome() {
           ),
         me.earnSummary && h('span', { class: 'rates' }, me.earnSummary),
       ),
+      birthdayCard(me.birthday, m),
       !m.homeStore.loyaltyLive && h('div', { class: 'card' }, h('b', {}, `Rewards are coming soon to ${m.homeStore.name}`), h('span', { class: 'sub' }, 'You can earn and use rewards at stores where they are live. Change your store in Account.')),
       ready &&
         h(
