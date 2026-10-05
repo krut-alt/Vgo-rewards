@@ -7,6 +7,10 @@ const dialogBody = document.getElementById('dialog-body');
 
 let boot = null; // bootstrap data from the API
 
+// Pages pass `condition && element`; skip the falses instead of printing them.
+const replaceMain = main.replaceChildren.bind(main);
+main.replaceChildren = (...children) => replaceMain(...children.flat(Infinity).filter((c) => c !== false && c !== null && c !== undefined && c !== ''));
+
 // ---------- helpers ----------
 
 async function api(method, path, body) {
@@ -350,7 +354,7 @@ function blankForm() {
     id: null,
     section: 'offer',
     status: 'draft',
-    kind: 'fuel',
+    kind: isAdmin() ? 'fuel' : 'item',
     name: '',
     memberText: '',
     centsPerGallon: 10,
@@ -384,6 +388,8 @@ function blankForm() {
     priority: undefined,
     welcome: false,
     requiresClip: false,
+    geofence: false,
+    radiusMiles: 1,
   };
 }
 
@@ -401,6 +407,8 @@ function formFromRule(rule) {
     priority: rule.priority,
     welcome: rule.welcome ?? false,
     requiresClip: rule.requiresClip ?? false,
+    geofence: Boolean(rule.geofence),
+    radiusMiles: rule.geofence?.radiusMiles ?? 1,
     starts: rule.schedule?.startsAt ? localYmd(rule.schedule.startsAt) : '',
     ends: rule.schedule?.endsAt ? addDaysYmd(localYmd(rule.schedule.endsAt), -1) : '',
     days: rule.schedule?.daysOfWeek ?? [],
@@ -518,7 +526,8 @@ function ruleFromForm(f) {
     stackingGroup: f.stackingGroup ?? null,
     priority: f.priority ?? null,
     welcome: f.welcome || null,
-    requiresClip: f.requiresClip || null,
+    requiresClip: f.requiresClip || (f.section === 'offer' && f.geofence) || null,
+    geofence: f.section === 'offer' && f.geofence ? { radiusMiles: Number(f.radiusMiles) } : null,
   };
   if (f.id) rule.id = f.id;
   return rule;
@@ -783,6 +792,32 @@ function renderOfferForm(id) {
           ),
           f.scopeKind === 'stores' && h('div', { class: 'store-pick' }, storeRows),
           f.scopeKind === 'groups' && h('div', { class: 'store-pick' }, groupRows),
+          f.section === 'offer' &&
+            h(
+              'label',
+              { class: 'row' },
+              h('input', { type: 'checkbox', checked: f.geofence, onchange: (e) => set({ geofence: e.target.checked, ...(e.target.checked ? { requiresClip: true } : {}) }, true) }),
+              'Near-store promo (geofence)',
+            ),
+          f.section === 'offer' &&
+            f.geofence &&
+            h(
+              'div',
+              { class: 'geo-box' },
+              field(
+                'How close',
+                h(
+                  'select',
+                  { onchange: (e) => set({ radiusMiles: Number(e.target.value) }) },
+                  [0.25, 0.5, 1, 2, 3, 5, 10].map((mi) => h('option', { value: mi, selected: Number(f.radiusMiles) === mi }, `Within ${mi} ${mi === 1 ? 'mile' : 'miles'}`)),
+                ),
+              ),
+              h(
+                'p',
+                { class: 'note' },
+                'Members see it in the app when their phone is within this distance, add it to their card there, and redeem it at the register by scanning their barcode or typing their phone. Each store needs a map location on the Locations page.',
+              ),
+            ),
           h('p', { class: 'note' }, 'Stores without loyalty enabled keep the offer saved and start it once their POS is connected.'),
         ),
         h(
@@ -1512,6 +1547,15 @@ function storeDialog(store) {
         ),
       ),
       field('POS link site ID', text('posSiteId', { placeholder: 'Filled in when the link is set up' }), 'The ID the POS loyalty link uses for this store.'),
+      field(
+        'Map location (for near-store promos)',
+        h('input', {
+          value: s.lat !== undefined && s.lat !== null ? `${s.lat}, ${s.lng}` : '',
+          placeholder: '34.8526, -82.3940',
+          oninput: (e) => (s.mapSpot = e.target.value),
+        }),
+        'In Google Maps, right-click the store and click the numbers at the top to copy them, then paste here.',
+      ),
     ),
     h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: s.loyaltyLive, onchange: (e) => (s.loyaltyLive = e.target.checked) }), 'Loyalty live at this store (POS connected and tested)'),
     field(
@@ -1553,6 +1597,13 @@ function storeDialog(store) {
             try {
               const body = { ...s };
               for (const k of ['address', 'zip', 'contactName', 'email', 'phone', 'posSiteId']) if (!String(body[k] ?? '').trim()) body[k] = null;
+              if (body.mapSpot !== undefined) {
+                const nums = body.mapSpot.match(/-?\d+(?:\.\d+)?/g) ?? [];
+                if (!body.mapSpot.trim()) (body.lat = null), (body.lng = null);
+                else if (nums.length !== 2) throw Object.assign(new Error('Paste the map location as two numbers, like 34.8526, -82.3940.'), { problems: ['Paste the map location as two numbers, like 34.8526, -82.3940.'] });
+                else (body.lat = Number(nums[0])), (body.lng = Number(nums[1]));
+                delete body.mapSpot;
+              }
               if (isNew) await api('POST', '/stores', body);
               else await api('PUT', `/stores/${s.id}`, body);
               await reload();

@@ -270,7 +270,8 @@ function offerCard(o, onChange) {
 
 async function clip(o, on, onChange) {
   try {
-    await api(on ? 'POST' : 'DELETE', `/offers/${o.ruleId}/clip`);
+    if (on && o.nearby && !here) here = await locate();
+    await api(on ? 'POST' : 'DELETE', `/offers/${o.ruleId}/clip`, on && here ? { lat: here.lat, lng: here.lng } : undefined);
     toast(on ? 'Added to your card' : 'Removed from your card');
     onChange();
   } catch (e) {
@@ -346,9 +347,46 @@ async function renderHome() {
 
 let offerFilter = 'all';
 let offerStoreId = null;
+// The phone's location, only after the member asks for near-store deals. Never stored.
+let here = null;
+let locating = false;
+
+function locate() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject(new Error('This phone can’t share its location with the app.'));
+    navigator.geolocation.getCurrentPosition(
+      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+      (e) => reject(new Error(e.code === 1 ? 'Location is off for this app. Turn it on in your browser settings to see deals near you.' : 'Couldn’t find your location. Try again.')),
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 120000 },
+    );
+  });
+}
+
+async function findNearby() {
+  locating = true;
+  renderOffers();
+  try {
+    here = await locate();
+  } catch (e) {
+    toast(e.message);
+  }
+  locating = false;
+  renderOffers();
+}
+
+// If the member already allowed location, refresh it quietly so near-store deals show up.
+async function refreshHereIfAllowed() {
+  try {
+    const p = await navigator.permissions?.query({ name: 'geolocation' });
+    if (p?.state === 'granted') here = await locate();
+  } catch {}
+}
 
 async function renderOffers() {
-  const res = await api('GET', `/offers${offerStoreId ? `?storeId=${encodeURIComponent(offerStoreId)}` : ''}`);
+  const q = new URLSearchParams();
+  if (offerStoreId) q.set('storeId', offerStoreId);
+  if (here) q.set('lat', String(here.lat)), q.set('lng', String(here.lng));
+  const res = await api('GET', `/offers${q.size ? `?${q}` : ''}`);
   const shown = res.offers.filter((o) => offerFilter === 'all' || o.kind === offerFilter);
   const filter = (id, label) => h('button', { class: `filter${offerFilter === id ? ' on' : ''}`, 'aria-pressed': offerFilter === id, onclick: () => ((offerFilter = id), renderOffers()) }, label);
   frame(
@@ -360,7 +398,20 @@ async function renderOffers() {
       h('button', { class: 'store-btn', onclick: pickStore }, svg(ICONS.pin), h('span', { style: 'flex:1' }, 'Showing offers at ', h('strong', {}, storeLabel(res.store))), h('span', { style: 'font-weight:600' }, 'Change')),
       h('div', { class: 'filters' }, filter('all', 'All'), filter('fuel', 'Fuel'), filter('food', 'Food and drink'), filter('brand', 'Brands')),
     ),
-    h('main', { class: 'content' }, shown.length ? shown.map((o) => offerCard(o, renderOffers)) : h('div', { class: 'empty-state' }, 'No offers here right now. Check back soon.')),
+    h(
+      'main',
+      { class: 'content' },
+      res.nearbyOffers &&
+        !here &&
+        h(
+          'section',
+          { class: 'card row' },
+          svg(ICONS.pin),
+          h('span', { style: 'flex:1;font-size:15px' }, 'Some deals only unlock when you’re at the store.'),
+          h('button', { class: 'pill-btn', disabled: locating, onclick: findNearby }, locating ? 'Finding you…' : 'Show deals near me'),
+        ),
+      shown.length ? shown.map((o) => offerCard(o, renderOffers)) : h('div', { class: 'empty-state' }, 'No offers here right now. Check back soon.'),
+    ),
   );
 }
 
@@ -594,7 +645,10 @@ async function render() {
   if (!token) return renderJoin();
   const page = location.hash.replace(/^#\/?/, '') || 'home';
   try {
-    if (page === 'offers') return await renderOffers();
+    if (page === 'offers') {
+      if (!here) await refreshHereIfAllowed();
+      return await renderOffers();
+    }
     if (page === 'use') return await renderUse();
     if (page === 'account') return await renderAccount();
     return await renderHome();

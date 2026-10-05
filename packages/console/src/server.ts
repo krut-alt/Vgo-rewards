@@ -23,6 +23,7 @@ import { MemberApi } from './member-api.js';
 import { PortalAuthService, type SignedIn } from './portal-auth.js';
 import { PRESETS } from './presets.js';
 import { ConsoleError, Repo, withoutNulls, type RuleInput } from './repo.js';
+import { spotFrom } from './geo.js';
 import { parseItemsCsv, searchItems } from './items.js';
 import { computeResults } from './results.js';
 import { ADMIN } from './seed.js';
@@ -43,7 +44,7 @@ export function ruleView(repo: Repo, rule: ConsoleRule, now = new Date()) {
     display: {
       status: displayStatus(rule, now),
       type: typeLabel(rule),
-      target: targetLabel(rule.scope, stores, groups),
+      target: `${targetLabel(rule.scope, stores, groups)}${rule.geofence ? ` · within ${rule.geofence.radiusMiles} mi` : ''}`,
       runs: runsLabel(rule),
       funded: fundedLabel(rule),
       reward: rewardLabel(rule),
@@ -330,9 +331,14 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
       members.updateAccount(member, await body(req));
       return [200, members.home(member)];
     }
-    if (method === 'GET' && path === '/offers') return [200, members.offers(member, url.searchParams.get('storeId') ?? undefined)];
-    if ((match = /^\/offers\/([\w-]+)\/clip$/.exec(path)) && (method === 'POST' || method === 'DELETE'))
-      return [200, { clippedRuleIds: members.setClip(member, match[1]!, method === 'POST') }];
+    if (method === 'GET' && path === '/offers') {
+      const at = spotFrom(url.searchParams.get('lat'), url.searchParams.get('lng'));
+      return [200, members.offers(member, url.searchParams.get('storeId') ?? undefined, at)];
+    }
+    if ((match = /^\/offers\/([\w-]+)\/clip$/.exec(path)) && (method === 'POST' || method === 'DELETE')) {
+      const { lat, lng } = method === 'POST' ? await body<{ lat?: unknown; lng?: unknown }>(req) : {};
+      return [200, { clippedRuleIds: members.setClip(member, match[1]!, method === 'POST', spotFrom(lat, lng)) }];
+    }
     if (method === 'PUT' && path === '/redeem') {
       const { ruleIds } = await body<{ ruleIds?: unknown }>(req);
       return [200, members.setRedeem(member, ruleIds)];

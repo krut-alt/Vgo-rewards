@@ -1,4 +1,5 @@
 // Pilot KPIs for the Results screen, computed from the transaction ledger.
+import { inScope } from '../../engine/src/index.js';
 import { NO_EARN_CATEGORIES } from './catalog.js';
 import { addDays, localParts } from './dates.js';
 import { targetLabel } from './labels.js';
@@ -124,7 +125,7 @@ export function computeResults(data: ConsoleData, view: 'pilot' | 'all', now = n
     .slice(0, 100);
 
   const offers = data.rules
-    .filter((r) => r.section !== 'earn' && r.status !== 'draft')
+    .filter((r) => r.section !== 'earn' && r.status !== 'draft' && (!only || visible.some((st) => inScope(r.scope, st))))
     .map((r) => {
       const hits = ledger.filter((e) => e.discounts.some((d) => d.ruleId === r.id && d.centsOff > 0));
       const fuelTied = r.effect.type === 'fuelDiscount' || r.conditions.some((c) => c.type === 'minGallons');

@@ -18,6 +18,7 @@ const MAX_CODES_PER_HOUR = 5;
 const SESSION_DAYS = 90;
 const FOOD_DRINK = ['coffee', 'fountain', 'sandwiches', 'hot-food', 'snacks', 'candy', 'energy', 'cold-drinks', 'beer', 'ice'];
 
+import { nearestWithin, type Spot } from './geo.js';
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 const digits = (phone: unknown) => String(phone ?? '').replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
 
@@ -30,6 +31,8 @@ export interface AppOffer {
   ends?: string;
   how: 'clip' | 'auto-pump' | 'auto-register' | 'punch';
   clipped: boolean;
+  /** A near-store promo, unlocked because the member is close to a participating store. */
+  nearby?: boolean;
 }
 
 export interface RedeemOption {
@@ -200,13 +203,26 @@ export class MemberApi {
     };
   }
 
-  offers(m: ConsoleMember, storeId?: string): { store: ConsoleStore; offers: AppOffer[] } {
+  /**
+   * Offers at one store. Near-store promos show only when the phone's location is close to a
+   * store the promo targets (or once they're on the card); `nearbyOffers` says whether sharing
+   * the location could unlock any.
+   */
+  offers(m: ConsoleMember, storeId?: string, at?: Spot): { store: ConsoleStore; offers: AppOffer[]; nearbyOffers: boolean } {
     const store = storeId ? this.repo.store(storeId) : this.homeStore(m);
-    const offers = this.runningAt(store)
-      .filter((r) => r.section === 'offer' && this.qualifiesNow(r, m))
-      .map((r) => this.offerView(r, m))
-      .sort((a, b) => Number(b.kind === 'fuel') - Number(a.kind === 'fuel'));
-    return { store, offers };
+    const running = this.runningAt(store).filter((r) => r.section === 'offer' && this.qualifiesNow(r, m));
+    const near = new Set(running.filter((r) => r.geofence && at && this.nearRuleStore(r, at)).map((r) => r.id));
+    const offers = running
+      .filter((r) => !r.geofence || near.has(r.id) || m.clippedRuleIds?.includes(r.id))
+      .map((r) => ({ ...this.offerView(r, m), ...(r.geofence ? { nearby: true, kicker: `Near you · ${this.offerView(r, m).kicker.split(' · ')[0]}` } : {}) }))
+      .sort((a, b) => Number(Boolean(b.nearby)) - Number(Boolean(a.nearby)) || Number(b.kind === 'fuel') - Number(a.kind === 'fuel'));
+    const nearbyOffers = this.repo.data.rules.some((r) => r.geofence && r.status === 'active' && r.section === 'offer');
+    return { store, offers, nearbyOffers };
+  }
+
+  private nearRuleStore(r: ConsoleRule, at: Spot): ConsoleStore | undefined {
+    const targeted = this.repo.data.stores.filter((s) => inScope(r.scope, s));
+    return nearestWithin(targeted, at, r.geofence!.radiusMiles);
   }
 
   redeemOptions(m: ConsoleMember, store = this.homeStore(m)): RedeemOption[] {
@@ -296,9 +312,11 @@ export class MemberApi {
 
   // ---- member actions ----
 
-  setClip(m: ConsoleMember, ruleId: string, on: boolean): string[] {
+  setClip(m: ConsoleMember, ruleId: string, on: boolean, at?: Spot): string[] {
     const rule = this.repo.rule(ruleId);
     if (!rule.requiresClip || rule.status !== 'active') throw new ConsoleError('This offer cannot be added to your card.', 400);
+    if (on && rule.geofence && !(at && this.nearRuleStore(rule, at)))
+      throw new ConsoleError('This deal is for members near the store. Add it when you are there, with location turned on.', 400);
     const set = new Set(m.clippedRuleIds ?? []);
     if (on) set.add(ruleId);
     else set.delete(ruleId);

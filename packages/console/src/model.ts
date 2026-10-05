@@ -11,6 +11,11 @@ export interface ConsoleRule extends Rule {
   memberText?: string;
   /** Set on the welcome reward, which Program settings edits. */
   welcome?: boolean;
+  /**
+   * Near-store promo: the app only shows it to members within this many miles of a targeted
+   * store, and they add it to their card there. Redeemed at the register like any card offer.
+   */
+  geofence?: { radiusMiles: number };
   createdAt: string;
   updatedAt: string;
 }
@@ -33,6 +38,9 @@ export interface ConsoleStore {
   pos: 'verifone-commander' | 'gilbarco-passport' | 'ncr-radiant' | 'other';
   /** The site ID the POS loyalty link uses for this store, filled in when the link is set up. */
   posSiteId?: string;
+  /** Map location, for near-store offers. */
+  lat?: number;
+  lng?: number;
   loyaltyLive: boolean;
   /** POS categories mapped for this store, e.g. "sandwiches". Offers on unmapped categories get a warning. */
   mappedCategories: string[];
