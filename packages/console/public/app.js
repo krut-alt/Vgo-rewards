@@ -16,6 +16,10 @@ async function api(method, path, body) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && path !== '/login') {
+    showLogin();
+    throw Object.assign(new Error('Please sign in.'), { problems: ['Please sign in.'], signIn: true });
+  }
   if (!res.ok) {
     const err = new Error(data.error || `Request failed (${res.status})`);
     err.problems = data.problems || [err.message];
@@ -76,7 +80,7 @@ function targetSummary(rule) {
   if (sc.kind === 'groups') return sc.groupIds.map((g) => boot.groups.find((x) => x.id === g)?.name ?? g).join(', ');
   return sc.storeIds.map(storeName).join(', ');
 }
-const PAYER = { jobber: 'Corporate', store: 'The store', brand: 'The brand', split: 'Split between corporate and the store' };
+const PAYER = { jobber: 'Corporate', store: 'The store', manufacturer: 'The manufacturer', split: 'Split between corporate and the store' };
 
 /** Asks once more before a discount goes live. Resolves true when confirmed. */
 function confirmDiscounts(rules) {
@@ -119,6 +123,9 @@ function errorBox(err) {
   return h('div', { class: 'error', role: 'alert' }, problems.length > 1 ? h('ul', {}, problems.map((p) => h('li', {}, p))) : problems[0]);
 }
 
+const isAdmin = () => boot?.me?.role !== 'store';
+const fundTotal = (f) => f.corporateCents + f.storeCents + f.otherCents;
+const fundSplit = (f) => `Corporate ${money(f.corporateCents + f.otherCents)} · store ${money(f.storeCents)}`;
 const money = (cents) => (cents % 100 === 0 ? `$${(cents / 100).toLocaleString()}` : `$${(cents / 100).toFixed(2)}`);
 const dollarsToCents = (v) => Math.round(Number(String(v).replace(/[$,]/g, '')) * 100);
 const pct = (x) => `${Math.round(x * 100)}%`;
@@ -159,6 +166,62 @@ function applyBranding() {
 async function reload() {
   boot = await api('GET', '/bootstrap');
   applyBranding();
+  showSignedIn(boot.me);
+}
+
+// ---------- sign-in ----------
+
+function showSignedIn(me) {
+  const store = me.role === 'store';
+  document.body.classList.remove('signed-out');
+  document.body.classList.toggle('store-user', store);
+  document.getElementById('console-kind').textContent = store ? 'Store back office' : 'Jobber console';
+  document.getElementById('who').textContent = `Signed in as ${me.name}`;
+  const out = document.getElementById('signout');
+  out.hidden = me.id === 'master' && !boot.signInRequired;
+  out.onclick = async () => {
+    await api('POST', '/logout');
+    boot = null;
+    showLogin();
+  };
+}
+
+function showLogin() {
+  if (document.body.classList.contains('signed-out') && main.querySelector('.login-card')) return;
+  document.body.classList.add('signed-out');
+  document.body.classList.remove('store-user');
+  document.getElementById('who').textContent = '';
+  document.getElementById('signout').hidden = true;
+  if (dialog.open) closeDialog();
+  const email = h('input', { type: 'text', autocomplete: 'username', required: true, autocapitalize: 'none' });
+  const password = h('input', { type: 'password', autocomplete: 'current-password', required: true });
+  const err = h('div', { role: 'alert' });
+  main.replaceChildren(
+    h(
+      'form',
+      {
+        class: 'card pad login-card',
+        onsubmit: async (e) => {
+          e.preventDefault();
+          err.replaceChildren();
+          try {
+            await api('POST', '/login', { email: email.value.trim(), password: password.value });
+            await reload();
+            render();
+          } catch (ex) {
+            err.replaceChildren(errorBox(ex));
+          }
+        },
+      },
+      h('h1', {}, 'Sign in'),
+      h('p', { class: 'note' }, 'Use the email and password your VGO admin gave you. The master account signs in as "admin".'),
+      h('label', { class: 'field' }, h('span', {}, 'Email'), email),
+      h('label', { class: 'field' }, h('span', {}, 'Password'), password),
+      err,
+      h('button', { class: 'btn accent', type: 'submit' }, 'Sign in'),
+    ),
+  );
+  email.focus();
 }
 
 function pageHead(title, lede, ...actions) {
@@ -232,7 +295,7 @@ function renderOffers() {
       'div',
       { class: 'pills' },
       h('span', { class: 'note' }, 'Show offers for'),
-      pill('Whole portfolio', { kind: 'all' }),
+      pill(isAdmin() ? 'Whole portfolio' : 'All my locations', { kind: 'all' }),
       boot.groups.map((g) => pill(g.name, { kind: 'group', id: g.id })),
       storeSelect,
     ),
@@ -305,9 +368,9 @@ function blankForm() {
     grades: [],
     firstVisit: false,
     otherConditions: [],
-    fundedBy: 'jobber',
+    fundedBy: isAdmin() ? 'jobber' : 'store',
     scopeKind: 'stores',
-    storeIds: [boot.pilot.storeId],
+    storeIds: [isAdmin() ? boot.pilot.storeId : boot.stores[0]?.id].filter(Boolean),
     groupIds: [],
     starts: today,
     ends: '',
@@ -690,6 +753,8 @@ function renderOfferForm(id) {
             ),
           f.otherConditions.length > 0 && h('p', { class: 'note' }, `Also keeps ${f.otherConditions.length} other qualifier${f.otherConditions.length > 1 ? 's' : ''} set earlier.`),
           field('Line members see under the name (optional)', h('textarea', { maxlength: 140, oninput: (e) => set({ memberText: e.target.value }) }, f.memberText)),
+          !isAdmin() && h('p', { class: 'note' }, 'Your store pays for offers you create. They run on top of the corporate program.'),
+          isAdmin() &&
           field(
             'Who pays for the discount',
             pills('fundedBy', [
@@ -704,6 +769,7 @@ function renderOfferForm(id) {
           'section',
           { class: 'card pad step' },
           h('h2', {}, '3. Where it runs'),
+          isAdmin() &&
           h(
             'div',
             { class: 'pills', role: 'radiogroup' },
@@ -1618,7 +1684,7 @@ async function renderMembers() {
   const search = h('input', {
     class: 'big-input',
     type: 'search',
-    placeholder: 'Search by name or phone',
+    placeholder: 'Search by name, phone or email',
     'aria-label': 'Search members',
     value: memberQuery,
     onkeydown: (e) => {
@@ -1714,6 +1780,7 @@ async function memberDialog(id) {
       { class: 'note' },
       `Phone ending ${m.phone.slice(-4)} · joined ${new Date(m.joinedAt).toLocaleDateString()} · ${m.visitCount} visits · home store ${m.homeStoreId ? storeName(m.homeStoreId) : 'not set'}`,
     ),
+    h('p', { class: 'note' }, m.email ? `Email ${m.email}${m.emailOptIn ? ' · gets offer emails' : ''}` : 'No email on file', ` · ${m.smsOptIn ? 'gets offer texts' : 'no offer texts'}`),
     h('div', { class: 'kpi card' }, h('span', { class: 'label' }, 'Points balance'), h('span', { class: 'value' }, m.pointsBalance.toLocaleString())),
     Object.keys(m.punches).length > 0 && h('p', { class: 'note' }, `Punch cards: ${Object.entries(m.punches).map(([k, v]) => `${k} ${v}`).join(', ')}`),
     h(
@@ -1847,7 +1914,6 @@ async function renderResults() {
   const r = await api('GET', `/results?view=${resultsView}`);
   const kpi = (label, value, sub) => h('div', { class: 'card kpi' }, h('span', { class: 'label' }, label), h('span', { class: 'value' }, value), sub && h('span', { class: 'sub' }, sub));
   const change = (cur, prev, fmt) => (prev === null ? 'First month of data' : `${cur >= prev ? 'Up' : 'Down'} from ${fmt(prev)} the 30 days before`);
-  const budgetShare = r.budget.monthlyCents ? Math.min(1, r.budget.usedCents / r.budget.monthlyCents) : 0;
   main.replaceChildren(
     h(
       'header',
@@ -1855,10 +1921,10 @@ async function renderResults() {
       h(
         'div',
         { class: 'intro' },
-        h('div', { class: 'row' }, h('h1', {}, r.view === 'pilot' ? 'Pilot results' : 'Portfolio results'), r.sample && h('span', { class: 'badge Sample' }, 'Sample data')),
-        h('span', { class: 'lede' }, `${r.pilot.storeName} · day ${r.pilot.day} of ${r.pilot.days} · members compared with non-members at the same stores`),
+        h('div', { class: 'row' }, h('h1', {}, !isAdmin() ? 'Your results' : r.view === 'pilot' ? 'Pilot results' : 'Portfolio results'), r.sample && h('span', { class: 'badge Sample' }, 'Sample data')),
+        h('span', { class: 'lede' }, isAdmin() ? `${r.pilot.storeName} · day ${r.pilot.day} of ${r.pilot.days} · members compared with non-members at the same stores` : boot.stores.map((x) => x.name).join(', ')),
       ),
-      h(
+      isAdmin() && h(
         'div',
         { class: 'pills' },
         h('span', { class: 'note' }, 'View'),
@@ -1869,6 +1935,7 @@ async function renderResults() {
       ),
     ),
     r.sample &&
+      isAdmin() &&
       h(
         'div',
         { class: 'notice row' },
@@ -1903,11 +1970,67 @@ async function renderResults() {
       ),
     ),
     h(
-      'section',
-      { class: 'card pad step' },
-      h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Rewards budget this month'), h('b', {}, `${money(r.budget.usedCents)} of ${money(r.budget.monthlyCents)}`)),
-      h('div', { class: 'bar', role: 'progressbar', 'aria-valuenow': Math.round(budgetShare * 100), 'aria-valuemin': 0, 'aria-valuemax': 100 }, h('div', { style: `width:${budgetShare * 100}%` })),
+      'div',
+      { class: 'kpis' },
+      kpi(`Active members (visit in last ${r.activeDays} days)`, r.activeMembers.toLocaleString(), isAdmin() ? (r.view === 'all' ? 'All locations' : 'Pilot locations') : 'Your locations'),
+      kpi('Rewards cashed out this month', money(fundTotal(r.rewardsThisMonth)), fundSplit(r.rewardsThisMonth)),
+      isAdmin() && r.budget.monthlyCents > 0 && kpi('Against the monthly budget', `${money(r.budget.usedCents)} of ${money(r.budget.monthlyCents)}`, 'Tracker only. Offers keep running past it.'),
     ),
+    h('h2', {}, 'By location'),
+    h(
+      'div',
+      { class: 'card table-wrap' },
+      h(
+        'table',
+        { style: 'min-width: 760px' },
+        h('thead', {}, h('tr', {}, ['Location', 'Loyalty', 'Active members', 'New in 30 days', 'Member visits, 30 days', 'Corporate rewards', 'Store rewards'].map((t, i) => h('th', { class: i >= 2 ? 'num' : '' }, t)))),
+        h(
+          'tbody',
+          {},
+          r.locations.map((l) =>
+            h(
+              'tr',
+              {},
+              h('td', { class: 'strong' }, l.name),
+              h('td', {}, l.loyaltyLive ? 'Live' : 'Not yet'),
+              h('td', { class: 'num' }, l.activeMembers.toLocaleString()),
+              h('td', { class: 'num' }, l.newMembers30.toLocaleString()),
+              h('td', { class: 'num' }, l.visits30.toLocaleString()),
+              h('td', { class: 'num' }, money(l.rewards.corporateCents + l.rewards.otherCents)),
+              h('td', { class: 'num' }, money(l.rewards.storeCents)),
+            ),
+          ),
+        ),
+      ),
+    ),
+    h('h2', {}, 'Rewards cashed out by member this month'),
+    r.cashOuts.length
+      ? h(
+          'div',
+          { class: 'card table-wrap' },
+          h(
+            'table',
+            { style: 'min-width: 600px' },
+            h('thead', {}, h('tr', {}, ['Member', 'Phone', 'Visits with a reward', 'Corporate', 'Store', 'Total'].map((t, i) => h('th', { class: i >= 2 ? 'num' : '' }, t)))),
+            h(
+              'tbody',
+              {},
+              r.cashOuts.map((c) =>
+                h(
+                  'tr',
+                  { class: 'click', tabindex: 0, onclick: () => memberDialog(c.memberId) },
+                  h('td', { class: 'strong' }, c.name),
+                  h('td', {}, c.phoneLast4 ? `••• ${c.phoneLast4}` : ''),
+                  h('td', { class: 'num' }, c.visits),
+                  h('td', { class: 'num' }, money(c.rewards.corporateCents + c.rewards.otherCents)),
+                  h('td', { class: 'num' }, money(c.rewards.storeCents)),
+                  h('td', { class: 'num strong' }, money(fundTotal(c.rewards))),
+                ),
+              ),
+            ),
+          ),
+        )
+      : h('p', { class: 'note' }, 'No rewards cashed out yet this month.'),
     h('h2', {}, 'Offer performance'),
     h(
       'div',
@@ -1933,7 +2056,8 @@ async function renderResults() {
         ),
       ),
     ),
-    h(
+    isAdmin() &&
+      h(
       'section',
       { class: 'card pad row' },
       h(
@@ -1947,9 +2071,218 @@ async function renderResults() {
   );
 }
 
+// ---------- Users (back-office access) ----------
+
+async function renderUsers() {
+  const users = await api('GET', '/users');
+  const when = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'Never');
+  main.replaceChildren(
+    pageHead(
+      'Users',
+      'Give each store its own back-office sign-in. One person can have several locations, and several people can share one.',
+      boot.signInRequired && h('button', { class: 'btn accent', onclick: () => userDialog(null) }, plusIcon(), 'Add user'),
+    ),
+    !boot.signInRequired && h('div', { class: 'notice' }, 'Sign-in is off on this server, so users cannot be added here. It turns on when VGO_ADMIN_PASSWORD is set.'),
+    h(
+      'div',
+      { class: 'card table-wrap' },
+      h(
+        'table',
+        { style: 'min-width: 700px' },
+        h('thead', {}, h('tr', {}, ['Name', 'Email', 'Access', 'Last sign-in'].map((t) => h('th', {}, t)))),
+        h(
+          'tbody',
+          {},
+          h('tr', {}, h('td', { class: 'strong' }, 'Master admin'), h('td', {}, 'admin'), h('td', {}, 'Everything'), h('td', {}, '')),
+          users.map((u) =>
+            h(
+              'tr',
+              { class: 'click', tabindex: 0, onclick: () => userDialog(u), onkeydown: (e) => e.key === 'Enter' && userDialog(u) },
+              h('td', { class: 'strong' }, u.name),
+              h('td', {}, u.email),
+              h('td', {}, u.role === 'admin' ? 'Admin, all locations' : h('div', { class: 'chips' }, u.storeIds.map((id) => h('span', { class: 'chip' }, storeName(id))))),
+              h('td', {}, when(u.lastSignInAt)),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+function userDialog(user) {
+  const isNew = !user;
+  const u = user ? structuredClone(user) : { name: '', email: '', role: 'store', storeIds: [] };
+  let password = '';
+  const errors = h('div', {});
+  const field = (label, input, hint) => h('label', { class: 'field' }, h('span', {}, label), input, hint ? h('span', { class: 'hint' }, hint) : null);
+  const storePick = h(
+    'div',
+    { class: 'pills' },
+    boot.stores.map((st) =>
+      h(
+        'label',
+        { class: 'pill' },
+        h('input', { type: 'checkbox', checked: u.storeIds.includes(st.id), onchange: (e) => (u.storeIds = e.target.checked ? [...u.storeIds, st.id] : u.storeIds.filter((x) => x !== st.id)) }),
+        ` ${st.name}`,
+      ),
+    ),
+  );
+  const draw = () =>
+    openDialog(
+      h('h2', {}, isNew ? 'Add a user' : u.name),
+      h(
+        'div',
+        { class: 'grid2' },
+        field('Name', h('input', { value: u.name, oninput: (e) => (u.name = e.target.value) })),
+        field('Email (used to sign in)', h('input', { type: 'email', value: u.email, autocomplete: 'off', oninput: (e) => (u.email = e.target.value) })),
+      ),
+      field(
+        'Access',
+        h(
+          'div',
+          { class: 'pills', role: 'radiogroup' },
+          [
+            ['store', 'Store back office'],
+            ['admin', 'Admin (everything)'],
+          ].map(([v, l]) => h('button', { type: 'button', role: 'radio', 'aria-checked': u.role === v, class: `pill${u.role === v ? ' on' : ''}`, onclick: () => ((u.role = v), draw()) }, l)),
+        ),
+      ),
+      u.role === 'store' && field('Locations they can see and run offers for', storePick),
+      field(
+        isNew ? 'Starting password' : 'New password (leave blank to keep the current one)',
+        h('input', { type: 'text', autocomplete: 'new-password', value: password, oninput: (e) => (password = e.target.value) }),
+        'At least 8 characters. Share it with them privately. Changing it signs them out everywhere.',
+      ),
+      errors,
+      h(
+        'div',
+        { class: 'row' },
+        !isNew &&
+          h(
+            'button',
+            {
+              class: 'btn ghost',
+              onclick: async () => {
+                if (!confirm(`Remove ${u.name}? They will be signed out and lose access.`)) return;
+                await api('DELETE', `/users/${u.id}`);
+                closeDialog();
+                toast('User removed');
+                render();
+              },
+            },
+            'Remove user',
+          ),
+        h('div', { class: 'grow' }),
+        h('button', { class: 'btn ghost', onclick: closeDialog }, 'Cancel'),
+        h(
+          'button',
+          {
+            class: 'btn accent',
+            onclick: async () => {
+              try {
+                const body = { name: u.name.trim(), email: u.email.trim(), role: u.role, storeIds: u.role === 'store' ? u.storeIds : [] };
+                if (password) body.password = password;
+                if (isNew) await api('POST', '/users', body);
+                else await api('PUT', `/users/${u.id}`, body);
+                closeDialog();
+                toast(isNew ? 'User added' : 'User saved');
+                render();
+              } catch (err) {
+                errors.replaceChildren(errorBox(err));
+              }
+            },
+          },
+          isNew ? 'Add user' : 'Save',
+        ),
+      ),
+    );
+  draw();
+}
+
+// ---------- Items catalog ----------
+
+let itemQuery = '';
+
+async function renderItems() {
+  const r = await api('GET', `/items?q=${encodeURIComponent(itemQuery)}`);
+  const file = h('input', { type: 'file', accept: '.csv,.txt,text/csv', hidden: true });
+  const status = h('div', {});
+  file.onchange = async () => {
+    const f = file.files?.[0];
+    if (!f) return;
+    status.replaceChildren(h('p', { class: 'note' }, `Reading ${f.name}…`));
+    try {
+      const res = await api('POST', '/items/upload', { csv: await f.text(), fileName: f.name });
+      toast(`${res.count.toLocaleString()} items uploaded`);
+      itemQuery = '';
+      await renderItems();
+      if (res.skipped) main.prepend(h('div', { class: 'notice' }, `${res.skipped.toLocaleString()} rows were skipped because they had no SKU, UPC or name.`));
+    } catch (err) {
+      status.replaceChildren(errorBox(err));
+    }
+  };
+  const search = h('input', {
+    type: 'search',
+    placeholder: 'Search by name, SKU, UPC or department',
+    value: itemQuery,
+    'aria-label': 'Search items',
+    onkeydown: (e) => {
+      if (e.key === 'Enter') {
+        itemQuery = e.target.value;
+        renderItems();
+      }
+    },
+  });
+  main.replaceChildren(
+    pageHead(
+      'Items',
+      r.count
+        ? `${r.count.toLocaleString()} items from ${r.fileName || 'the last upload'}, uploaded ${new Date(r.uploadedAt).toLocaleString()}. Item rewards will be tied to these SKUs and UPCs.`
+        : 'Upload your latest pricebook so item rewards can be tied to exact SKUs and UPCs.',
+      h('button', { class: 'btn accent', onclick: () => file.click() }, r.count ? 'Upload a new catalog' : 'Upload catalog'),
+      file,
+    ),
+    status,
+    h(
+      'p',
+      { class: 'note' },
+      'Use a CSV export from your back office or POS. The first row names the columns: SKU or Item code, UPC, Name or Description, Department, Price. A new upload replaces the whole catalog.',
+    ),
+    r.count > 0 && h('div', { class: 'row' }, search, h('span', { class: 'note' }, `${r.total.toLocaleString()} match${r.total === 1 ? '' : 'es'}${r.total > r.items.length ? `, showing the first ${r.items.length}` : ''}`)),
+    r.count > 0 &&
+      h(
+        'div',
+        { class: 'card table-wrap' },
+        h(
+          'table',
+          { style: 'min-width: 700px' },
+          h('thead', {}, h('tr', {}, ['SKU', 'UPC', 'Name', 'Department', 'Category', 'Price'].map((t, i) => h('th', { class: i === 5 ? 'num' : '' }, t)))),
+          h(
+            'tbody',
+            {},
+            r.items.map((i) =>
+              h(
+                'tr',
+                {},
+                h('td', {}, i.sku),
+                h('td', {}, i.upc ?? ''),
+                h('td', { class: 'strong' }, i.name),
+                h('td', {}, i.department ?? ''),
+                h('td', {}, i.category ? catLabel(i.category) : ''),
+                h('td', { class: 'num' }, i.priceCents === undefined ? '' : money(i.priceCents)),
+              ),
+            ),
+          ),
+        ),
+      ),
+  );
+}
+
 // ---------- router ----------
 
 async function render() {
+  if (!boot) return showLogin();
   const [page, id] = location.hash.replace(/^#\/?/, '').split('/');
   const section = page || 'offers';
   for (const a of document.querySelectorAll('[data-nav]')) {
@@ -1961,13 +2294,15 @@ async function render() {
   try {
     if (section === 'offers' && id) return renderOfferForm(id);
     form = null;
-    if (section === 'rules') return renderRules();
-    if (section === 'stores') return renderStores();
+    if (section === 'rules' && isAdmin()) return renderRules();
+    if (section === 'stores' && isAdmin()) return renderStores();
     if (section === 'members') return await renderMembers();
     if (section === 'results') return await renderResults();
+    if (section === 'users' && isAdmin()) return await renderUsers();
+    if (section === 'items' && isAdmin()) return await renderItems();
     return renderOffers();
   } catch (err) {
-    main.replaceChildren(errorBox(err));
+    if (!err.signIn) main.replaceChildren(errorBox(err));
   }
 }
 
@@ -1979,4 +2314,4 @@ window.addEventListener('hashchange', () => {
 
 reload()
   .then(render)
-  .catch((err) => main.replaceChildren(errorBox(err)));
+  .catch((err) => err.signIn || main.replaceChildren(errorBox(err)));

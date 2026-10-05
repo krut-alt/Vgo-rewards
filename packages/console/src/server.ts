@@ -23,6 +23,7 @@ import { MemberApi } from './member-api.js';
 import { PortalAuthService, type SignedIn } from './portal-auth.js';
 import { PRESETS } from './presets.js';
 import { ConsoleError, Repo, withoutNulls, type RuleInput } from './repo.js';
+import { parseItemsCsv, searchItems } from './items.js';
 import { computeResults } from './results.js';
 import { ADMIN } from './seed.js';
 
@@ -51,12 +52,12 @@ export function ruleView(repo: Repo, rule: ConsoleRule, now = new Date()) {
   };
 }
 
-async function body<T>(req: IncomingMessage): Promise<T> {
+async function body<T>(req: IncomingMessage, limit = 2_000_000): Promise<T> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > 2_000_000) throw new ConsoleError('Request is too large.', 413);
+    if (size > limit) throw new ConsoleError('Request is too large.', 413);
     chunks.push(chunk as Buffer);
   }
   if (!size) return {} as T;
@@ -164,6 +165,7 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
           grades: FUEL_GRADES.map(({ id, label }) => ({ id, label })),
           draftExamples: DRAFT_EXAMPLES,
           pilot: d.pilot,
+          signInRequired: Boolean(portal),
         },
       ];
     }
@@ -216,10 +218,13 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
     }
 
     if (method === 'GET' && path === '/members') {
-      const q = (url.searchParams.get('q') ?? '').toLowerCase().replace(/[^\w ]/g, '');
+      const raw = (url.searchParams.get('q') ?? '').toLowerCase().trim();
+      const q = raw.replace(/[^\w ]/g, '');
       const digits = q.replace(/\D/g, '');
       const list = repo.data.members.filter(
-        (mm) => memberVisible(mm.id) && (!q || mm.name.toLowerCase().includes(q) || (digits.length >= 3 && mm.phone.includes(digits))),
+        (mm) =>
+          memberVisible(mm.id) &&
+          (!q || mm.name.toLowerCase().includes(q) || (digits.length >= 3 && mm.phone.includes(digits)) || (raw.includes('@') && Boolean(mm.email?.includes(raw)))),
       );
       return [200, { total: list.length, members: list.slice(-200).reverse() }];
     }
@@ -239,6 +244,7 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
     }
     if (method === 'POST' && (match = m(/^\/members\/([\w-]+)\/points$/))) {
       const { delta, reason } = await body<{ delta: number; reason: string }>(req);
+      if (!memberVisible(match[1]!)) throw new ConsoleError('Member not found.', 404);
       return [200, repo.adjustPoints(match[1]!, Number(delta), String(reason ?? ''), actor)];
     }
 
@@ -246,11 +252,25 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
     if (method === 'PUT' && path === '/branding') return [200, repo.updateBranding(await body(req), actor)];
     if (method === 'GET' && path === '/results') {
       const view = url.searchParams.get('view') === 'all' ? 'all' : 'pilot';
-      return [200, computeResults(repo.data, view, clock())];
+      return [200, computeResults(repo.data, mine ? 'all' : view, clock(), mine)];
     }
     if (method === 'GET' && path === '/history') {
       adminOnly();
       return [200, repo.data.history.slice(0, 200)];
+    }
+    if (method === 'GET' && path === '/items') {
+      adminOnly();
+      const c = repo.data.items;
+      return [200, { ...searchItems(c, url.searchParams.get('q') ?? ''), count: c?.items.length ?? 0, uploadedAt: c?.uploadedAt ?? null, fileName: c?.fileName ?? null }];
+    }
+    if (method === 'POST' && path === '/items/upload') {
+      adminOnly();
+      const { csv, fileName } = await body<{ csv?: string; fileName?: string }>(req, 15_000_000);
+      const { items, skipped } = parseItemsCsv(String(csv ?? ''));
+      repo.data.items = { items, uploadedAt: clock().toISOString(), ...(fileName ? { fileName: String(fileName).slice(0, 120) } : {}) };
+      repo.note(actor, `Uploaded the items catalog (${items.length.toLocaleString()} items${fileName ? ` from ${fileName}` : ''})`);
+      repo.save();
+      return [200, { count: items.length, skipped }];
     }
     if (method === 'GET' && path === '/users') {
       adminOnly();
@@ -292,8 +312,14 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
       return [200, await members.requestCode(phone)];
     }
     if (method === 'POST' && path === '/verify') {
-      const { phone, code, firstName, smsOptIn, homeStoreId } = await body<Record<string, string | boolean | undefined>>(req);
-      const result = members.verify(phone, code, { firstName: firstName as string, smsOptIn: Boolean(smsOptIn), homeStoreId: homeStoreId as string });
+      const { phone, code, firstName, smsOptIn, homeStoreId, email, emailOptIn } = await body<Record<string, string | boolean | undefined>>(req);
+      const result = members.verify(phone, code, {
+        firstName: firstName as string,
+        smsOptIn: Boolean(smsOptIn),
+        homeStoreId: homeStoreId as string,
+        email: email as string,
+        emailOptIn: Boolean(emailOptIn),
+      });
       return [200, result];
     }
 

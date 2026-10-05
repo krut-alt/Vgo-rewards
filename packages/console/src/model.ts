@@ -1,3 +1,4 @@
+import type { ItemCatalog } from './items.js';
 // Console data model: what the jobber manages, stored as one JSON document for the pilot.
 import type { Rule, StoreId, Transaction } from '../../engine/src/index.js';
 
@@ -53,6 +54,10 @@ export interface ConsoleMember {
   punches: Record<string, number>;
   joinedAt: string;
   lastVisitAt?: string;
+  /** Optional. The phone number stays the member ID and how they sign in. */
+  email?: string;
+  /** Agreed to offer emails; can be changed in the app. */
+  emailOptIn?: boolean;
   /** Agreed to offer texts at sign-up; can be changed in the app. */
   smsOptIn?: boolean;
   /** Offers the member added to their card in the app. */
@@ -137,6 +142,8 @@ export interface ConsoleData {
   history: ChangeEntry[];
   auth?: AppAuth;
   portal?: PortalAuth;
+  /** The latest uploaded pricebook. */
+  items?: ItemCatalog;
   /** Data updates already applied to this file; see migrate.ts. */
   migrations?: string[];
   /** When the pilot started, for "day 45 of 90" on Results. */

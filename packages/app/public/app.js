@@ -118,7 +118,7 @@ function signOutLocal() {
 
 // ---------- sign up and sign in ----------
 
-let joinState = { mode: 'join', step: 'details', phone: '', firstName: '', smsOptIn: true, homeStoreId: null, devCode: null, error: null };
+let joinState = { mode: 'join', step: 'details', phone: '', firstName: '', email: '', emailOptIn: true, smsOptIn: true, homeStoreId: null, devCode: null, error: null };
 
 function renderJoin() {
   const s = joinState;
@@ -136,6 +136,13 @@ function renderJoin() {
         h(
           'div',
           { class: 'field' },
+          h('label', { for: 'email' }, 'Email (optional)'),
+          h('input', { id: 'email', type: 'email', autocomplete: 'email', inputmode: 'email', placeholder: 'you@example.com', value: s.email, oninput: (e) => (s.email = e.target.value) }),
+          h('span', { class: 'hint' }, 'For receipts and offers by email. You still sign in with your phone.'),
+        ),
+        h(
+          'div',
+          { class: 'field' },
           h('label', { for: 'home' }, 'Your store'),
           h(
             'select',
@@ -149,6 +156,7 @@ function renderJoin() {
           h('input', { type: 'checkbox', checked: s.smsOptIn, onchange: (e) => (s.smsOptIn = e.target.checked) }),
           'Text me offers from my store. Msg and data rates may apply. Reply STOP to opt out.',
         ),
+        h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: s.emailOptIn, onchange: (e) => (s.emailOptIn = e.target.checked) }), 'Email me offers too, if I added an email'),
       ],
       err,
       h('div', { style: 'flex:1' }),
@@ -195,6 +203,7 @@ async function sendCode() {
   const digits = s.phone.replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
   if (digits.length !== 10) return ((s.error = 'Enter your 10-digit mobile number.'), renderJoin());
   if (s.mode === 'join' && !s.firstName.trim()) return ((s.error = 'Enter your first name.'), renderJoin());
+  if (s.mode === 'join' && s.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.email.trim())) return ((s.error = 'Check the email address, or leave it blank.'), renderJoin());
   try {
     const res = await api('POST', '/code', { phone: digits });
     Object.assign(s, { phone: digits, step: 'code', devCode: res.devCode ?? null, error: null });
@@ -210,7 +219,7 @@ async function verifyCode(code) {
     const res = await api('POST', '/verify', {
       phone: s.phone,
       code,
-      ...(s.mode === 'join' ? { firstName: s.firstName, smsOptIn: s.smsOptIn, homeStoreId: s.homeStoreId } : {}),
+      ...(s.mode === 'join' ? { firstName: s.firstName, smsOptIn: s.smsOptIn, homeStoreId: s.homeStoreId, email: s.email.trim(), emailOptIn: s.emailOptIn } : {}),
     });
     if (res.needsSignup) {
       // Signed in with a number that isn't a member yet: collect a name, then the same code still works.
@@ -506,14 +515,28 @@ async function renderAccount() {
           h('label', { for: 'acct-store' }, 'Home store'),
           h('select', { id: 'acct-store' }, config.stores.map((s) => h('option', { value: s.id, selected: s.id === m.homeStore.id }, `${storeLabel(s)}${s.loyaltyLive ? '' : ' (coming soon)'}`))),
         ),
+        h(
+          'div',
+          { class: 'field' },
+          h('label', { for: 'acct-email' }, 'Email (optional)'),
+          h('input', { id: 'acct-email', type: 'email', inputmode: 'email', autocomplete: 'email', value: m.email }),
+          h('span', { class: 'hint' }, 'Your phone number stays your member ID and how you sign in.'),
+        ),
         h('label', { class: 'check' }, h('input', { id: 'acct-sms', type: 'checkbox', checked: m.smsOptIn }), 'Text me offers from my store'),
+        h('label', { class: 'check' }, h('input', { id: 'acct-email-optin', type: 'checkbox', checked: m.emailOptIn }), 'Email me offers'),
         h(
           'button',
           {
             class: 'cta',
             onclick: async () => {
               try {
-                await api('PUT', '/me', { firstName: name.value, homeStoreId: document.getElementById('acct-store').value, smsOptIn: document.getElementById('acct-sms').checked });
+                await api('PUT', '/me', {
+                  firstName: name.value,
+                  homeStoreId: document.getElementById('acct-store').value,
+                  smsOptIn: document.getElementById('acct-sms').checked,
+                  email: document.getElementById('acct-email').value,
+                  emailOptIn: document.getElementById('acct-email-optin').checked,
+                });
                 toast('Saved');
                 renderAccount();
               } catch (e) {

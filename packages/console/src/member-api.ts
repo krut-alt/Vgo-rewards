@@ -42,6 +42,14 @@ export interface RedeemOption {
   selected: boolean;
 }
 
+
+/** Empty means no email. Throws on something that is not an email address. */
+function cleanEmail(raw: unknown): string | undefined {
+  const email = String(raw ?? '').trim().toLowerCase();
+  if (!email) return undefined;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 120) throw new ConsoleError('Check the email address, or leave it blank.');
+  return email;
+}
 export class MemberApi {
   constructor(
     private readonly repo: Repo,
@@ -96,7 +104,7 @@ export class MemberApi {
   verify(
     rawPhone: unknown,
     code: unknown,
-    signup?: { firstName?: string; smsOptIn?: boolean; homeStoreId?: string },
+    signup?: { firstName?: string; smsOptIn?: boolean; homeStoreId?: string; email?: string; emailOptIn?: boolean },
   ): { token: string; isNew: boolean } | { needsSignup: true } {
     const phone = digits(rawPhone);
     const entry = this.auth.codes[phone];
@@ -113,11 +121,16 @@ export class MemberApi {
     if (!member) {
       const firstName = String(signup?.firstName ?? '').trim();
       if (!firstName) return { needsSignup: true };
+      const email = cleanEmail(signup?.email);
       const live = this.repo.data.stores.find((s) => s.id === signup?.homeStoreId) ?? this.repo.data.stores.find((s) => s.id === this.repo.data.pilot.storeId);
       member = this.repo.createMember(
         { name: firstName.slice(0, 40), phone, homeStoreId: live?.id, smsOptIn: Boolean(signup?.smsOptIn) },
         { role: 'jobber-admin', userId: 'app' },
       );
+      if (email) {
+        member.email = email;
+        member.emailOptIn = Boolean(signup?.emailOptIn);
+      }
       isNew = true;
     }
     delete this.auth.codes[phone];
@@ -263,6 +276,8 @@ export class MemberApi {
         phone: m.phone,
         points: m.pointsBalance,
         smsOptIn: m.smsOptIn ?? false,
+        email: m.email ?? '',
+        emailOptIn: m.emailOptIn ?? false,
         visitCount: m.visitCount,
         homeStore: { id: store.id, name: store.name, city: store.city, state: store.state, loyaltyLive: store.loyaltyLive },
       },
@@ -305,7 +320,13 @@ export class MemberApi {
     return this.redeemOptions(m);
   }
 
-  updateAccount(m: ConsoleMember, patch: { firstName?: unknown; smsOptIn?: unknown; homeStoreId?: unknown }): void {
+  updateAccount(m: ConsoleMember, patch: { firstName?: unknown; smsOptIn?: unknown; homeStoreId?: unknown; email?: unknown; emailOptIn?: unknown }): void {
+    if (patch.email !== undefined) {
+      const email = cleanEmail(patch.email);
+      if (email) m.email = email;
+      else delete m.email;
+    }
+    if (patch.emailOptIn !== undefined) m.emailOptIn = Boolean(patch.emailOptIn) && Boolean(m.email);
     if (patch.firstName !== undefined) {
       const name = String(patch.firstName).trim();
       if (!name) throw new ConsoleError('Enter your first name.');
