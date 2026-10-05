@@ -48,6 +48,12 @@ describe('Twilio texts', () => {
     await expect(twilioSender(config, f.impl)('8035550199', 'x')).rejects.toMatchObject({ status: 502 });
   });
 
+  it('ignores quotes and spaces pasted around settings', () => {
+    expect(twilioConfigFromEnv({ TWILIO_ACCOUNT_SID: ' "AC1" ', TWILIO_AUTH_TOKEN: "'tok'", TWILIO_FROM: '+17372583478 ' })).toEqual({
+      accountSid: 'AC1', authToken: 'tok', from: '+17372583478',
+    });
+  });
+
   it('uses Twilio only when all three settings are present', () => {
     expect(twilioConfigFromEnv({ TWILIO_ACCOUNT_SID: 'AC1', TWILIO_AUTH_TOKEN: 't' })).toBeUndefined();
     expect(smsSenderFromEnv({}).name).toBe('server log');

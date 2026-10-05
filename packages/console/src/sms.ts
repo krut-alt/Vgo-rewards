@@ -12,10 +12,15 @@ export interface TwilioConfig {
 }
 
 /** Reads TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_FROM; undefined when any is missing. */
+/** Trims spaces and any quotes pasted along with a value from a .env file. */
+export function cleanSetting(value: string | undefined): string | undefined {
+  return value?.trim().replace(/^(["'])(.*)\1$/, '$2').trim() || undefined;
+}
+
 export function twilioConfigFromEnv(env: NodeJS.ProcessEnv = process.env): TwilioConfig | undefined {
-  const accountSid = env.TWILIO_ACCOUNT_SID?.trim();
-  const authToken = env.TWILIO_AUTH_TOKEN?.trim();
-  const from = env.TWILIO_FROM?.trim();
+  const accountSid = cleanSetting(env.TWILIO_ACCOUNT_SID);
+  const authToken = cleanSetting(env.TWILIO_AUTH_TOKEN);
+  const from = cleanSetting(env.TWILIO_FROM);
   return accountSid && authToken && from ? { accountSid, authToken, from } : undefined;
 }
 
