@@ -42,7 +42,10 @@ npm test
 npm run console   # console at http://localhost:4310, member app at /app/
 ```
 
-Sign-in codes are written to the server log until an SMS provider is connected.
+Sign-in codes are texted through Twilio when `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` and
+`TWILIO_FROM` (the Twilio number, as `+1XXXXXXXXXX`) are set; otherwise they go to the server log.
+A Twilio trial account is free but only texts numbers verified in the Twilio console, and adds
+"Sent from your Twilio trial account" to each text. That is fine for testing with staff phones.
 `VGO_DEV_CODES=1 npm run console` also shows the code in the app, for local testing only.
 
 The console keeps its data in `data/console.json` (set `VGO_DATA` to move it). A new console
