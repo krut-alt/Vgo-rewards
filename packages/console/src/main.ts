@@ -1,6 +1,7 @@
 // Starts the console: `npm run console`, then open http://localhost:4310.
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { fileMediaStore, upstashMediaStore } from './media.js';
 import { MemberApi } from './member-api.js';
 import { upstashConfigFromEnv, upstashStore } from './remote-store.js';
 import { Repo } from './repo.js';
@@ -17,7 +18,7 @@ if (upstash) {
   const store = upstashStore(upstash);
   const saved = await store.load();
   repo = new Repo(saved ?? seedData(), (d) => store.save(d));
-  if (!saved) repo.save();
+  if (!saved || repo.migrated) repo.save();
   // Free hosts stop idle servers; finish the last save before exiting.
   process.once('SIGTERM', () => void store.idle().finally(() => process.exit(0)));
 } else {
@@ -25,7 +26,8 @@ if (upstash) {
 }
 const port = Number(process.env.PORT ?? 4310);
 const host = process.env.HOST ?? '127.0.0.1';
-// VGO_ADMIN_PASSWORD protects the console. It is required whenever the server is reachable from other machines.
+// VGO_ADMIN_PASSWORD turns on portal sign-in ("admin" + this password is the master admin). It is required
+// whenever the server is reachable from other machines. VGO_POS_KEY is what the POS link signs its calls with.
 const adminPassword = process.env.VGO_ADMIN_PASSWORD || undefined;
 if (!adminPassword && !['127.0.0.1', 'localhost', '::1'].includes(host)) {
   console.error('Set VGO_ADMIN_PASSWORD before serving the console on a public address.');
@@ -40,6 +42,8 @@ createApp(repo, resolve(process.env.VGO_PUBLIC ?? 'packages/console/public'), {
   appDir: resolve(process.env.VGO_APP ?? 'packages/app/public'),
   memberApi,
   adminPassword,
+  posKey: process.env.VGO_POS_KEY || undefined,
+  media: upstash ? upstashMediaStore(upstash) : fileMediaStore(resolve(dirname(dataFile), 'media')),
 }).listen(port, host, () => {
   console.log(`VGO Rewards console: http://localhost:${port}   member app: http://localhost:${port}/app/   (data: ${upstash ? 'Upstash' : dataFile}, texts: ${sms.name})`);
 });

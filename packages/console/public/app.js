@@ -7,6 +7,10 @@ const dialogBody = document.getElementById('dialog-body');
 
 let boot = null; // bootstrap data from the API
 
+// Pages pass `condition && element`; skip the falses instead of printing them.
+const replaceMain = main.replaceChildren.bind(main);
+main.replaceChildren = (...children) => replaceMain(...children.flat(Infinity).filter((c) => c !== false && c !== null && c !== undefined && c !== ''));
+
 // ---------- helpers ----------
 
 async function api(method, path, body) {
@@ -16,6 +20,10 @@ async function api(method, path, body) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && path !== '/login') {
+    showLogin();
+    throw Object.assign(new Error('Please sign in.'), { problems: ['Please sign in.'], signIn: true });
+  }
   if (!res.ok) {
     const err = new Error(data.error || `Request failed (${res.status})`);
     err.problems = data.problems || [err.message];
@@ -59,11 +67,69 @@ dialog.addEventListener('click', (e) => {
   if (e.target === dialog) closeDialog();
 });
 
+const DISCOUNT_TYPES = ['fuelDiscount', 'itemDiscount', 'basketDiscount', 'punchCard'];
+const isDiscount = (rule) => DISCOUNT_TYPES.includes(rule.effect?.type);
+
+function discountSummary(rule) {
+  const e = rule.effect;
+  if (e.type === 'fuelDiscount') return `${e.centsPerGallon}¢ a gallon off, up to ${e.maxGallons} gallons${e.costPoints ? `, for ${e.costPoints} points` : ''}`;
+  if (e.type === 'basketDiscount') return `${money(e.centsOff)} off the purchase`;
+  if (e.type === 'punchCard') return `Buy ${e.every}, get the next one free`;
+  if (e.type === 'itemDiscount') return e.percentOff ? `${e.percentOff}% off` : e.centsOff ? `${money(e.centsOff)} off` : 'Free item';
+  return '';
+}
+function targetSummary(rule) {
+  const sc = rule.scope;
+  if (sc.kind === 'all') return `All ${boot.stores.length} locations`;
+  if (sc.kind === 'groups') return sc.groupIds.map((g) => boot.groups.find((x) => x.id === g)?.name ?? g).join(', ');
+  return sc.storeIds.map(storeName).join(', ');
+}
+const PAYER = { jobber: 'Corporate', store: 'The store', manufacturer: 'The manufacturer', split: 'Split between corporate and the store' };
+
+/** Asks once more before a discount goes live. Resolves true when confirmed. */
+function confirmDiscounts(rules) {
+  const list = rules.filter(isDiscount);
+  if (!list.length) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const done = (ok) => {
+      dialog.removeEventListener('close', onClose);
+      closeDialog();
+      resolve(ok);
+    };
+    const onClose = () => done(false);
+    dialog.addEventListener('close', onClose);
+    openDialog(
+      h('h2', {}, list.length > 1 ? `Confirm ${list.length} discounts` : 'Confirm this discount'),
+      h('p', {}, 'Customers will get this at checkout once it’s on. Please check it once more.'),
+      ...list.map((r) =>
+        h(
+          'div',
+          { class: 'card confirm-card' },
+          h('b', {}, r.name || 'Untitled'),
+          h('div', {}, discountSummary(r)),
+          h('div', { class: 'meta' }, `Where: ${targetSummary(r)}`),
+          h('div', { class: 'meta' }, `Who pays: ${PAYER[r.fundedBy] ?? r.fundedBy}`),
+        ),
+      ),
+      h(
+        'div',
+        { class: 'row' },
+        h('div', { class: 'grow' }),
+        h('button', { class: 'btn ghost', onclick: () => done(false) }, 'Go back'),
+        h('button', { class: 'btn accent', onclick: () => done(true) }, 'Yes, save it'),
+      ),
+    );
+  });
+}
+
 function errorBox(err) {
   const problems = err.problems || [err.message];
   return h('div', { class: 'error', role: 'alert' }, problems.length > 1 ? h('ul', {}, problems.map((p) => h('li', {}, p))) : problems[0]);
 }
 
+const isAdmin = () => boot?.me?.role !== 'store';
+const fundTotal = (f) => f.corporateCents + f.storeCents + f.otherCents;
+const fundSplit = (f) => `Corporate ${money(f.corporateCents + f.otherCents)} · store ${money(f.storeCents)}`;
 const money = (cents) => (cents % 100 === 0 ? `$${(cents / 100).toLocaleString()}` : `$${(cents / 100).toFixed(2)}`);
 const dollarsToCents = (v) => Math.round(Number(String(v).replace(/[$,]/g, '')) * 100);
 const pct = (x) => `${Math.round(x * 100)}%`;
@@ -104,6 +170,62 @@ function applyBranding() {
 async function reload() {
   boot = await api('GET', '/bootstrap');
   applyBranding();
+  showSignedIn(boot.me);
+}
+
+// ---------- sign-in ----------
+
+function showSignedIn(me) {
+  const store = me.role === 'store';
+  document.body.classList.remove('signed-out');
+  document.body.classList.toggle('store-user', store);
+  document.getElementById('console-kind').textContent = store ? 'Store back office' : 'Jobber console';
+  document.getElementById('who').textContent = `Signed in as ${me.name}`;
+  const out = document.getElementById('signout');
+  out.hidden = me.id === 'master' && !boot.signInRequired;
+  out.onclick = async () => {
+    await api('POST', '/logout');
+    boot = null;
+    showLogin();
+  };
+}
+
+function showLogin() {
+  if (document.body.classList.contains('signed-out') && main.querySelector('.login-card')) return;
+  document.body.classList.add('signed-out');
+  document.body.classList.remove('store-user');
+  document.getElementById('who').textContent = '';
+  document.getElementById('signout').hidden = true;
+  if (dialog.open) closeDialog();
+  const email = h('input', { type: 'text', autocomplete: 'username', required: true, autocapitalize: 'none' });
+  const password = h('input', { type: 'password', autocomplete: 'current-password', required: true });
+  const err = h('div', { role: 'alert' });
+  main.replaceChildren(
+    h(
+      'form',
+      {
+        class: 'card pad login-card',
+        onsubmit: async (e) => {
+          e.preventDefault();
+          err.replaceChildren();
+          try {
+            await api('POST', '/login', { email: email.value.trim(), password: password.value });
+            await reload();
+            render();
+          } catch (ex) {
+            err.replaceChildren(errorBox(ex));
+          }
+        },
+      },
+      h('h1', {}, 'Sign in'),
+      h('p', { class: 'note' }, 'Use the email and password your VGO admin gave you. The master account signs in as "admin".'),
+      h('label', { class: 'field' }, h('span', {}, 'Email'), email),
+      h('label', { class: 'field' }, h('span', {}, 'Password'), password),
+      err,
+      h('button', { class: 'btn accent', type: 'submit' }, 'Sign in'),
+    ),
+  );
+  email.focus();
 }
 
 function pageHead(title, lede, ...actions) {
@@ -177,7 +299,7 @@ function renderOffers() {
       'div',
       { class: 'pills' },
       h('span', { class: 'note' }, 'Show offers for'),
-      pill('Whole portfolio', { kind: 'all' }),
+      pill(isAdmin() ? 'Whole portfolio' : 'All my locations', { kind: 'all' }),
       boot.groups.map((g) => pill(g.name, { kind: 'group', id: g.id })),
       storeSelect,
     ),
@@ -196,7 +318,11 @@ function renderOffers() {
                 h(
                   'tr',
                   { class: 'click', tabindex: 0, onclick: () => (location.hash = `#/offers/${r.id}`), onkeydown: (e) => e.key === 'Enter' && (location.hash = `#/offers/${r.id}`) },
-                  h('td', { class: 'strong' }, r.name),
+                  h(
+                    'td',
+                    { class: 'strong' },
+                    h('div', { class: 'offer-name' }, h('div', { class: 'thumb' }, artFrame({ imageUrl: r.display.imageUrl, headline: r.display.headline, kind: r.display.artKind })), h('span', {}, r.name, r.featured && h('span', { class: 'feat' }, 'Featured'))),
+                  ),
                   h('td', {}, r.display.type),
                   h('td', {}, r.display.target),
                   h('td', {}, r.display.funded),
@@ -232,7 +358,7 @@ function blankForm() {
     id: null,
     section: 'offer',
     status: 'draft',
-    kind: 'fuel',
+    kind: isAdmin() ? 'fuel' : 'item',
     name: '',
     memberText: '',
     centsPerGallon: 10,
@@ -250,9 +376,9 @@ function blankForm() {
     grades: [],
     firstVisit: false,
     otherConditions: [],
-    fundedBy: 'jobber',
+    fundedBy: isAdmin() ? 'jobber' : 'store',
     scopeKind: 'stores',
-    storeIds: [boot.pilot.storeId],
+    storeIds: [isAdmin() ? boot.pilot.storeId : boot.stores[0]?.id].filter(Boolean),
     groupIds: [],
     starts: today,
     ends: '',
@@ -266,6 +392,11 @@ function blankForm() {
     priority: undefined,
     welcome: false,
     requiresClip: false,
+    geofence: false,
+    radiusMiles: 1,
+    mediaId: null,
+    headline: '',
+    featured: false,
   };
 }
 
@@ -283,6 +414,11 @@ function formFromRule(rule) {
     priority: rule.priority,
     welcome: rule.welcome ?? false,
     requiresClip: rule.requiresClip ?? false,
+    geofence: Boolean(rule.geofence),
+    radiusMiles: rule.geofence?.radiusMiles ?? 1,
+    mediaId: rule.artwork?.mediaId ?? null,
+    headline: rule.headline ?? '',
+    featured: rule.featured ?? false,
     starts: rule.schedule?.startsAt ? localYmd(rule.schedule.startsAt) : '',
     ends: rule.schedule?.endsAt ? addDaysYmd(localYmd(rule.schedule.endsAt), -1) : '',
     days: rule.schedule?.daysOfWeek ?? [],
@@ -400,7 +536,11 @@ function ruleFromForm(f) {
     stackingGroup: f.stackingGroup ?? null,
     priority: f.priority ?? null,
     welcome: f.welcome || null,
-    requiresClip: f.requiresClip || null,
+    requiresClip: f.requiresClip || (f.section === 'offer' && f.geofence) || null,
+    geofence: f.section === 'offer' && f.geofence ? { radiusMiles: Number(f.radiusMiles) } : null,
+    artwork: f.mediaId ? { mediaId: f.mediaId } : null,
+    headline: f.headline.trim() || null,
+    featured: f.featured || null,
   };
   if (f.id) rule.id = f.id;
   return rule;
@@ -553,6 +693,7 @@ function renderOfferForm(id) {
   const save = async (status) => {
     errors.replaceChildren();
     const rule = ruleFromForm({ ...f, status: status ?? f.status });
+    if (rule.status !== 'draft' && !(await confirmDiscounts([rule]))) return;
     try {
       const saved = existing ? await api('PUT', `/rules/${existing.id}`, rule) : await api('POST', '/rules', rule);
       await reload();
@@ -565,6 +706,7 @@ function renderOfferForm(id) {
     }
   };
   const setStatus = async (status) => {
+    if (status === 'active' && !(await confirmDiscounts([existing]))) return;
     try {
       await api('POST', `/rules/${existing.id}/status`, { status });
       await reload();
@@ -633,6 +775,8 @@ function renderOfferForm(id) {
             ),
           f.otherConditions.length > 0 && h('p', { class: 'note' }, `Also keeps ${f.otherConditions.length} other qualifier${f.otherConditions.length > 1 ? 's' : ''} set earlier.`),
           field('Line members see under the name (optional)', h('textarea', { maxlength: 140, oninput: (e) => set({ memberText: e.target.value }) }, f.memberText)),
+          !isAdmin() && h('p', { class: 'note' }, 'Your store pays for offers you create. They run on top of the corporate program.'),
+          isAdmin() &&
           field(
             'Who pays for the discount',
             pills('fundedBy', [
@@ -647,6 +791,7 @@ function renderOfferForm(id) {
           'section',
           { class: 'card pad step' },
           h('h2', {}, '3. Where it runs'),
+          isAdmin() &&
           h(
             'div',
             { class: 'pills', role: 'radiogroup' },
@@ -660,6 +805,32 @@ function renderOfferForm(id) {
           ),
           f.scopeKind === 'stores' && h('div', { class: 'store-pick' }, storeRows),
           f.scopeKind === 'groups' && h('div', { class: 'store-pick' }, groupRows),
+          f.section === 'offer' &&
+            h(
+              'label',
+              { class: 'row' },
+              h('input', { type: 'checkbox', checked: f.geofence, onchange: (e) => set({ geofence: e.target.checked, ...(e.target.checked ? { requiresClip: true } : {}) }, true) }),
+              'Near-store promo (geofence)',
+            ),
+          f.section === 'offer' &&
+            f.geofence &&
+            h(
+              'div',
+              { class: 'geo-box' },
+              field(
+                'How close',
+                h(
+                  'select',
+                  { onchange: (e) => set({ radiusMiles: Number(e.target.value) }) },
+                  [0.25, 0.5, 1, 2, 3, 5, 10].map((mi) => h('option', { value: mi, selected: Number(f.radiusMiles) === mi }, `Within ${mi} ${mi === 1 ? 'mile' : 'miles'}`)),
+                ),
+              ),
+              h(
+                'p',
+                { class: 'note' },
+                'Members see it in the app when their phone is within this distance, add it to their card there, and redeem it at the register by scanning their barcode or typing their phone. Each store needs a map location on the Locations page.',
+              ),
+            ),
           h('p', { class: 'note' }, 'Stores without loyalty enabled keep the offer saved and start it once their POS is connected.'),
         ),
         h(
@@ -714,6 +885,7 @@ function renderOfferForm(id) {
             field('Budget cap per month ($)', text('budget', { inputmode: 'decimal', placeholder: 'No cap' }), 'Stops the discount once it has cost this much in a month.'),
           ),
         ),
+        artSection(f, set),
         errors,
         actions,
       ),
@@ -730,14 +902,19 @@ function renderOfferForm(id) {
         h(
           'section',
           { class: 'card pad step' },
-          h('h2', {}, 'Member preview'),
+          h('h2', {}, 'How it looks in the app'),
           h(
             'div',
-            { class: 'preview-card' },
-            h('span', { class: 'kicker' }, v ? `${v.display.type} · ${v.display.target}` : 'Offer'),
-            h('span', { class: 'title' }, rule.name || 'Offer name'),
-            h('span', { class: 'line' }, v ? v.display.memberLine : ''),
-            v && h('span', { class: 'tag' }, v.display.runs),
+            { class: 'app-card' },
+            artFrame({ imageUrl: f.mediaId ? `/media/${f.mediaId}` : null, headline: v?.display.headline ?? (f.headline || 'YOUR DEAL'), kind: v?.display.artKind ?? 'other', name: rule.name }),
+            h(
+              'div',
+              { class: 'app-card-body' },
+              h('span', { class: 'kicker' }, v ? `${v.display.type} · ${v.display.target}` : 'Offer'),
+              h('span', { class: 'title' }, rule.name || 'Offer name'),
+              h('span', { class: 'line' }, v ? v.display.memberLine : ''),
+              v && h('span', { class: 'tag' }, v.display.runs),
+            ),
           ),
         ),
         h(
@@ -907,6 +1084,10 @@ function ruleRow(rule) {
         checked: on,
         'aria-label': `${rule.name} on or off`,
         onchange: async (e) => {
+          if (e.target.checked && !(await confirmDiscounts([rule]))) {
+            e.target.checked = false;
+            return;
+          }
           try {
             await api('POST', `/rules/${rule.id}/status`, { status: e.target.checked ? 'active' : 'paused' });
             await reload();
@@ -1264,6 +1445,7 @@ function applyPreviewBranding() {
 async function saveRulesPage() {
   const errors = document.getElementById('rules-errors');
   errors.replaceChildren();
+  if (!(await confirmDiscounts(Object.values(ruleEdits).filter((r) => r.status !== 'draft')))) return;
   try {
     for (const [id, rule] of Object.entries(ruleEdits)) {
       const { display, createdAt, updatedAt, createdBy, ...input } = rule;
@@ -1349,17 +1531,32 @@ function renderRules() {
 // ---------- Stores and groups ----------
 
 function storeDialog(store) {
-  const s = structuredClone(store);
+  const isNew = !store;
+  const s = store
+    ? structuredClone(store)
+    : { id: '', name: '', address: '', city: '', state: 'SC', zip: '', contactName: '', email: '', phone: '', groupIds: [], pos: 'verifone-commander', posSiteId: '', loyaltyLive: false, mappedCategories: [] };
   const errors = h('div', {});
-  const field = (label, input) => h('label', { class: 'field' }, h('span', {}, label), input);
+  const field = (label, input, hint) => h('label', { class: 'field' }, h('span', {}, label), input, hint ? h('span', { class: 'hint' }, hint) : null);
+  const text = (key, attrs = {}) => h('input', { value: s[key] ?? '', oninput: (e) => (s[key] = e.target.value), ...attrs });
   openDialog(
-    h('h2', {}, s.name),
+    h('h2', {}, isNew ? 'Add a location' : s.name),
+    h('h3', { class: 'dialog-section' }, 'Site'),
     h(
       'div',
       { class: 'grid2' },
-      field('Name', h('input', { value: s.name, oninput: (e) => (s.name = e.target.value) })),
-      field('City', h('input', { value: s.city, oninput: (e) => (s.city = e.target.value) })),
-      field('State', h('select', { onchange: (e) => (s.state = e.target.value) }, ['SC', 'NC', 'GA'].map((st) => h('option', { selected: s.state === st }, st)))),
+      field('Site name', text('name', { placeholder: 'e.g. VGO 14' })),
+      field('Contact person', text('contactName')),
+      field('Street address', text('address')),
+      field('City', text('city')),
+      field('State', text('state', { maxlength: 2, placeholder: 'SC', style: 'text-transform:uppercase' })),
+      field('ZIP', text('zip', { inputmode: 'numeric', maxlength: 10 })),
+      field('Email (optional)', text('email', { type: 'email' })),
+      field('Phone (optional)', text('phone', { type: 'tel', inputmode: 'tel' })),
+    ),
+    h('h3', { class: 'dialog-section' }, 'POS connection'),
+    h(
+      'div',
+      { class: 'grid2' },
       field(
         'POS',
         h(
@@ -1367,6 +1564,16 @@ function storeDialog(store) {
           { onchange: (e) => (s.pos = e.target.value) },
           ['verifone-commander', 'gilbarco-passport', 'ncr-radiant', 'other'].map((p) => h('option', { value: p, selected: s.pos === p }, posLabel(p))),
         ),
+      ),
+      field('POS link site ID', text('posSiteId', { placeholder: 'Filled in when the link is set up' }), 'The ID the POS loyalty link uses for this store.'),
+      field(
+        'Map location (for near-store promos)',
+        h('input', {
+          value: s.lat !== undefined && s.lat !== null ? `${s.lat}, ${s.lng}` : '',
+          placeholder: '34.8526, -82.3940',
+          oninput: (e) => (s.mapSpot = e.target.value),
+        }),
+        'In Google Maps, right-click the store and click the numbers at the top to copy them, then paste here.',
       ),
     ),
     h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: s.loyaltyLive, onchange: (e) => (s.loyaltyLive = e.target.checked) }), 'Loyalty live at this store (POS connected and tested)'),
@@ -1407,17 +1614,27 @@ function storeDialog(store) {
           class: 'btn accent',
           onclick: async () => {
             try {
-              await api('PUT', `/stores/${s.id}`, s);
+              const body = { ...s };
+              for (const k of ['address', 'zip', 'contactName', 'email', 'phone', 'posSiteId']) if (!String(body[k] ?? '').trim()) body[k] = null;
+              if (body.mapSpot !== undefined) {
+                const nums = body.mapSpot.match(/-?\d+(?:\.\d+)?/g) ?? [];
+                if (!body.mapSpot.trim()) (body.lat = null), (body.lng = null);
+                else if (nums.length !== 2) throw Object.assign(new Error('Paste the map location as two numbers, like 34.8526, -82.3940.'), { problems: ['Paste the map location as two numbers, like 34.8526, -82.3940.'] });
+                else (body.lat = Number(nums[0])), (body.lng = Number(nums[1]));
+                delete body.mapSpot;
+              }
+              if (isNew) await api('POST', '/stores', body);
+              else await api('PUT', `/stores/${s.id}`, body);
               await reload();
               closeDialog();
-              toast('Store saved');
+              toast(isNew ? 'Location added' : 'Location saved');
               render();
             } catch (err) {
               errors.replaceChildren(errorBox(err));
             }
           },
         },
-        'Save',
+        isNew ? 'Add location' : 'Save',
       ),
     ),
   );
@@ -1474,14 +1691,18 @@ function groupDialog(group) {
 function renderStores() {
   const live = boot.stores.filter((s) => s.loyaltyLive).length;
   main.replaceChildren(
-    pageHead('Stores and groups', `${live} of ${boot.stores.length} stores have loyalty live. Groups let you send an offer to several stores at once.`),
+    pageHead(
+      'Locations',
+      `${live} of ${boot.stores.length} locations have loyalty live. Groups let you send an offer to several stores at once.`,
+      h('button', { class: 'btn accent', onclick: () => storeDialog(null) }, plusIcon(), 'Add location'),
+    ),
     h(
       'div',
       { class: 'card table-wrap' },
       h(
         'table',
         { style: 'min-width: 760px' },
-        h('thead', {}, h('tr', {}, ['Store', 'Location', 'POS', 'Loyalty', 'Groups', 'Mapped categories'].map((t) => h('th', {}, t)))),
+        h('thead', {}, h('tr', {}, ['Site', 'Address', 'Contact', 'POS', 'Loyalty', 'Groups'].map((t) => h('th', {}, t)))),
         h(
           'tbody',
           {},
@@ -1490,17 +1711,17 @@ function renderStores() {
               'tr',
               { class: 'click', tabindex: 0, onclick: () => storeDialog(s), onkeydown: (e) => e.key === 'Enter' && storeDialog(s) },
               h('td', { class: 'strong' }, s.name),
-              h('td', {}, s.city ? `${s.city}, ${s.state}` : s.state),
+              h('td', {}, [s.address, s.city ? `${s.city}, ${s.state}` : s.state].filter(Boolean).join(', ')),
+              h('td', {}, s.contactName || '—'),
               h('td', {}, posLabel(s.pos)),
               h('td', {}, h('span', { class: `badge ${s.loyaltyLive ? 'Live' : 'Draft'}` }, s.loyaltyLive ? 'Live' : 'Not enabled')),
               h('td', {}, s.groupIds.map((g) => boot.groups.find((x) => x.id === g)?.name ?? g).join(', ')),
-              h('td', {}, s.mappedCategories.length || '—'),
             ),
           ),
         ),
       ),
     ),
-    h('p', { class: 'note' }, 'Store cities, the state split and POS for stores 02 to 13 are placeholders until confirmed. Click a store to update it.'),
+    h('p', { class: 'note' }, 'Cities, the state split and POS for stores 02 to 13 are placeholders until confirmed. Click a location to update it.'),
     h(
       'div',
       { class: 'page-head' },
@@ -1533,7 +1754,7 @@ async function renderMembers() {
   const search = h('input', {
     class: 'big-input',
     type: 'search',
-    placeholder: 'Search by name or phone',
+    placeholder: 'Search by name, phone or email',
     'aria-label': 'Search members',
     value: memberQuery,
     onkeydown: (e) => {
@@ -1628,6 +1849,22 @@ async function memberDialog(id) {
       'p',
       { class: 'note' },
       `Phone ending ${m.phone.slice(-4)} · joined ${new Date(m.joinedAt).toLocaleDateString()} · ${m.visitCount} visits · home store ${m.homeStoreId ? storeName(m.homeStoreId) : 'not set'}`,
+    ),
+    h(
+      'p',
+      { class: 'note' },
+      [
+        m.email ? `Email ${m.email}` : 'No email on file',
+        m.birthday && `Birthday ${new Date(2024, Number(m.birthday.slice(0, 2)) - 1, Number(m.birthday.slice(3))).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}`,
+        m.zip && `ZIP ${m.zip}`,
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    ),
+    h(
+      'p',
+      { class: 'note' },
+      `Offer texts: ${m.smsOptIn ? `yes${m.smsOptInAt ? `, agreed ${new Date(m.smsOptInAt).toLocaleDateString()}` : ''}` : 'no'} · Offer emails: ${m.emailOptIn ? `yes${m.emailOptInAt ? `, agreed ${new Date(m.emailOptInAt).toLocaleDateString()}` : ''}` : 'no'}`,
     ),
     h('div', { class: 'kpi card' }, h('span', { class: 'label' }, 'Points balance'), h('span', { class: 'value' }, m.pointsBalance.toLocaleString())),
     Object.keys(m.punches).length > 0 && h('p', { class: 'note' }, `Punch cards: ${Object.entries(m.punches).map(([k, v]) => `${k} ${v}`).join(', ')}`),
@@ -1762,7 +1999,6 @@ async function renderResults() {
   const r = await api('GET', `/results?view=${resultsView}`);
   const kpi = (label, value, sub) => h('div', { class: 'card kpi' }, h('span', { class: 'label' }, label), h('span', { class: 'value' }, value), sub && h('span', { class: 'sub' }, sub));
   const change = (cur, prev, fmt) => (prev === null ? 'First month of data' : `${cur >= prev ? 'Up' : 'Down'} from ${fmt(prev)} the 30 days before`);
-  const budgetShare = r.budget.monthlyCents ? Math.min(1, r.budget.usedCents / r.budget.monthlyCents) : 0;
   main.replaceChildren(
     h(
       'header',
@@ -1770,10 +2006,10 @@ async function renderResults() {
       h(
         'div',
         { class: 'intro' },
-        h('div', { class: 'row' }, h('h1', {}, r.view === 'pilot' ? 'Pilot results' : 'Portfolio results'), r.sample && h('span', { class: 'badge Sample' }, 'Sample data')),
-        h('span', { class: 'lede' }, `${r.pilot.storeName} · day ${r.pilot.day} of ${r.pilot.days} · members compared with non-members at the same stores`),
+        h('div', { class: 'row' }, h('h1', {}, !isAdmin() ? 'Your results' : r.view === 'pilot' ? 'Pilot results' : 'Portfolio results'), r.sample && h('span', { class: 'badge Sample' }, 'Sample data')),
+        h('span', { class: 'lede' }, isAdmin() ? `${r.pilot.storeName} · day ${r.pilot.day} of ${r.pilot.days} · members compared with non-members at the same stores` : boot.stores.map((x) => x.name).join(', ')),
       ),
-      h(
+      isAdmin() && h(
         'div',
         { class: 'pills' },
         h('span', { class: 'note' }, 'View'),
@@ -1784,6 +2020,7 @@ async function renderResults() {
       ),
     ),
     r.sample &&
+      isAdmin() &&
       h(
         'div',
         { class: 'notice row' },
@@ -1818,11 +2055,67 @@ async function renderResults() {
       ),
     ),
     h(
-      'section',
-      { class: 'card pad step' },
-      h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Rewards budget this month'), h('b', {}, `${money(r.budget.usedCents)} of ${money(r.budget.monthlyCents)}`)),
-      h('div', { class: 'bar', role: 'progressbar', 'aria-valuenow': Math.round(budgetShare * 100), 'aria-valuemin': 0, 'aria-valuemax': 100 }, h('div', { style: `width:${budgetShare * 100}%` })),
+      'div',
+      { class: 'kpis' },
+      kpi(`Active members (visit in last ${r.activeDays} days)`, r.activeMembers.toLocaleString(), isAdmin() ? (r.view === 'all' ? 'All locations' : 'Pilot locations') : 'Your locations'),
+      kpi('Rewards cashed out this month', money(fundTotal(r.rewardsThisMonth)), fundSplit(r.rewardsThisMonth)),
+      isAdmin() && r.budget.monthlyCents > 0 && kpi('Against the monthly budget', `${money(r.budget.usedCents)} of ${money(r.budget.monthlyCents)}`, 'Tracker only. Offers keep running past it.'),
     ),
+    h('h2', {}, 'By location'),
+    h(
+      'div',
+      { class: 'card table-wrap' },
+      h(
+        'table',
+        { style: 'min-width: 760px' },
+        h('thead', {}, h('tr', {}, ['Location', 'Loyalty', 'Active members', 'New in 30 days', 'Member visits, 30 days', 'Corporate rewards', 'Store rewards'].map((t, i) => h('th', { class: i >= 2 ? 'num' : '' }, t)))),
+        h(
+          'tbody',
+          {},
+          r.locations.map((l) =>
+            h(
+              'tr',
+              {},
+              h('td', { class: 'strong' }, l.name),
+              h('td', {}, l.loyaltyLive ? 'Live' : 'Not yet'),
+              h('td', { class: 'num' }, l.activeMembers.toLocaleString()),
+              h('td', { class: 'num' }, l.newMembers30.toLocaleString()),
+              h('td', { class: 'num' }, l.visits30.toLocaleString()),
+              h('td', { class: 'num' }, money(l.rewards.corporateCents + l.rewards.otherCents)),
+              h('td', { class: 'num' }, money(l.rewards.storeCents)),
+            ),
+          ),
+        ),
+      ),
+    ),
+    h('h2', {}, 'Rewards cashed out by member this month'),
+    r.cashOuts.length
+      ? h(
+          'div',
+          { class: 'card table-wrap' },
+          h(
+            'table',
+            { style: 'min-width: 600px' },
+            h('thead', {}, h('tr', {}, ['Member', 'Phone', 'Visits with a reward', 'Corporate', 'Store', 'Total'].map((t, i) => h('th', { class: i >= 2 ? 'num' : '' }, t)))),
+            h(
+              'tbody',
+              {},
+              r.cashOuts.map((c) =>
+                h(
+                  'tr',
+                  { class: 'click', tabindex: 0, onclick: () => memberDialog(c.memberId) },
+                  h('td', { class: 'strong' }, c.name),
+                  h('td', {}, c.phoneLast4 ? `••• ${c.phoneLast4}` : ''),
+                  h('td', { class: 'num' }, c.visits),
+                  h('td', { class: 'num' }, money(c.rewards.corporateCents + c.rewards.otherCents)),
+                  h('td', { class: 'num' }, money(c.rewards.storeCents)),
+                  h('td', { class: 'num strong' }, money(fundTotal(c.rewards))),
+                ),
+              ),
+            ),
+          ),
+        )
+      : h('p', { class: 'note' }, 'No rewards cashed out yet this month.'),
     h('h2', {}, 'Offer performance'),
     h(
       'div',
@@ -1848,7 +2141,8 @@ async function renderResults() {
         ),
       ),
     ),
-    h(
+    isAdmin() &&
+      h(
       'section',
       { class: 'card pad row' },
       h(
@@ -1857,14 +2151,380 @@ async function renderResults() {
         h('h2', {}, 'Rollout readiness'),
         h('p', { class: 'note' }, `${r.rollout.live} of ${r.rollout.total} stores ${r.rollout.live === 1 ? 'has' : 'have'} loyalty enabled. The rest need a technician visit to go live.`),
       ),
-      h('a', { class: 'btn', href: '#/stores' }, 'Manage stores'),
+      h('a', { class: 'btn', href: '#/stores' }, 'Manage locations'),
     ),
+  );
+}
+
+
+// ---------- Reward artwork ----------
+
+const ART_W = 1200;
+const ART_H = 675;
+
+/** The 16:9 picture on an app card: the uploaded art, or the headline on a colored panel. */
+function artFrame({ imageUrl, headline, kind, name }) {
+  if (imageUrl) return h('div', { class: 'art-frame' }, h('img', { src: imageUrl, alt: name ? `${name} artwork` : 'Reward artwork', loading: 'lazy' }));
+  return h('div', { class: `art-frame poster ${kind || 'other'}` }, h('span', { class: 'poster-text' }, headline), h('img', { class: 'poster-logo', src: boot.branding.logoDataUrl || '/vgo-logo.png', alt: '' }));
+}
+
+function loadImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('That file is not an image this browser can read. Use a JPG, PNG or WebP.'));
+    img.src = url;
+  });
+}
+
+/**
+ * Resizes any picture to the one standard reward size. "fill" crops to fill the frame;
+ * "fit" keeps the whole flyer and fills the sides with a blurred copy of it.
+ */
+async function standardArt(file, fit) {
+  const img = await loadImage(file);
+  const c = document.createElement('canvas');
+  c.width = ART_W;
+  c.height = ART_H;
+  const ctx = c.getContext('2d');
+  const cover = Math.max(ART_W / img.width, ART_H / img.height);
+  const drawAt = (scale) => {
+    const w = img.width * scale;
+    const hh = img.height * scale;
+    ctx.drawImage(img, (ART_W - w) / 2, (ART_H - hh) / 2, w, hh);
+  };
+  if (fit === 'fit') {
+    ctx.filter = 'blur(28px) brightness(0.75)';
+    drawAt(cover * 1.1);
+    ctx.filter = 'none';
+    drawAt(Math.min(ART_W / img.width, ART_H / img.height));
+  } else drawAt(cover);
+  let q = 0.86;
+  let url = c.toDataURL('image/jpeg', q);
+  while (url.length > 1_800_000 && q > 0.5) url = c.toDataURL('image/jpeg', (q -= 0.1));
+  return url;
+}
+
+/** Tall or square flyers keep their whole picture; wide photos fill the frame. */
+const autoFit = (img) => (img.width / img.height < 1.45 ? 'fit' : 'fill');
+
+async function uploadArt(file, fit) {
+  const dataUrl = await standardArt(file, fit);
+  return api('POST', '/media', { dataUrl, name: file.name });
+}
+
+async function artLibraryDialog(onPick) {
+  const items = await api('GET', '/media');
+  openDialog(
+    h('h2', {}, 'Artwork library'),
+    h('p', { class: 'note' }, 'Everything uploaded so far. Pick one to use it on this reward.'),
+    items.length
+      ? h(
+          'div',
+          { class: 'art-library' },
+          items.map((m) =>
+            h(
+              'button',
+              { class: 'art-pick', type: 'button', onclick: () => (closeDialog(), onPick(m.id)) },
+              h('div', { class: 'art-frame' }, h('img', { src: `/media/${m.id}`, alt: '', loading: 'lazy' })),
+              h('span', { class: 'note' }, m.name),
+            ),
+          ),
+        )
+      : h('p', {}, 'No artwork yet.'),
+    h('div', { class: 'row' }, h('div', { class: 'grow' }), h('button', { class: 'btn ghost', onclick: closeDialog }, 'Close')),
+  );
+}
+
+function artSection(f, set) {
+  const status = h('div', {});
+  const file = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp,image/gif', hidden: true });
+  const useFile = async (picked, fit) => {
+    status.replaceChildren(h('p', { class: 'note' }, 'Sizing and uploading…'));
+    try {
+      f.artFile = picked;
+      f.artFit = fit ?? autoFit(await loadImage(picked));
+      const info = await uploadArt(picked, f.artFit);
+      set({ mediaId: info.id }, true);
+    } catch (err) {
+      status.replaceChildren(errorBox(err));
+    }
+  };
+  file.onchange = () => file.files?.[0] && useFile(file.files[0]);
+  const drop = h(
+    'div',
+    {
+      class: 'art-drop',
+      ondragover: (e) => (e.preventDefault(), e.currentTarget.classList.add('over')),
+      ondragleave: (e) => e.currentTarget.classList.remove('over'),
+      ondrop: (e) => {
+        e.preventDefault();
+        e.currentTarget.classList.remove('over');
+        const picked = e.dataTransfer.files?.[0];
+        if (picked) useFile(picked);
+      },
+    },
+    f.mediaId ? h('div', { class: 'art-frame' }, h('img', { src: `/media/${f.mediaId}`, alt: 'Current artwork' })) : h('div', { class: 'art-empty' }, h('b', {}, 'Drop a flyer or picture here'), h('span', { class: 'note' }, 'or use the buttons below. Any size works.')),
+  );
+  return h(
+    'section',
+    { class: 'card pad step' },
+    h('h2', {}, '5. Artwork and app display'),
+    h(
+      'p',
+      { class: 'note' },
+      `Every picture is resized to the same ${ART_W}×${ART_H} banner, so all rewards line up in the app. Without artwork, the app shows the headline on a colored banner.`,
+    ),
+    drop,
+    file,
+    status,
+    h(
+      'div',
+      { class: 'row wrap' },
+      h('button', { class: 'btn', type: 'button', onclick: () => file.click() }, f.mediaId ? 'Replace artwork' : 'Upload artwork'),
+      h('button', { class: 'btn ghost', type: 'button', onclick: () => artLibraryDialog((id) => ((f.artFile = null), set({ mediaId: id }, true))) }, 'Choose from library'),
+      f.mediaId && h('button', { class: 'btn ghost', type: 'button', onclick: () => ((f.artFile = null), set({ mediaId: null }, true)) }, 'Remove'),
+    ),
+    f.mediaId &&
+      f.artFile &&
+      h(
+        'div',
+        { class: 'pills', role: 'radiogroup', 'aria-label': 'How the picture fits' },
+        h('span', { class: 'note' }, 'Fit'),
+        [
+          ['fit', 'Show the whole flyer'],
+          ['fill', 'Fill the banner (crops edges)'],
+        ].map(([v, l]) =>
+          h('button', { type: 'button', role: 'radio', 'aria-checked': f.artFit === v, class: `pill${f.artFit === v ? ' on' : ''}`, onclick: () => f.artFit !== v && useFile(f.artFile, v) }, l),
+        ),
+      ),
+    h(
+      'div',
+      { class: 'grid2' },
+      h(
+        'label',
+        { class: 'field' },
+        h('span', {}, 'Banner headline (when there is no artwork)'),
+        h('input', { type: 'text', maxlength: 28, value: f.headline, placeholder: 'Made from the reward, e.g. 25¢ OFF A GALLON', oninput: (e) => set({ headline: e.target.value }) }),
+      ),
+    ),
+    h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: f.featured, onchange: (e) => set({ featured: e.target.checked }) }), 'Feature it in the big slider at the top of the app home screen'),
+  );
+}
+
+// ---------- Users (back-office access) ----------
+
+async function renderUsers() {
+  const users = await api('GET', '/users');
+  const when = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'Never');
+  main.replaceChildren(
+    pageHead(
+      'Users',
+      'Give each store its own back-office sign-in. One person can have several locations, and several people can share one.',
+      boot.signInRequired && h('button', { class: 'btn accent', onclick: () => userDialog(null) }, plusIcon(), 'Add user'),
+    ),
+    !boot.signInRequired && h('div', { class: 'notice' }, 'Sign-in is off on this server, so users cannot be added here. It turns on when VGO_ADMIN_PASSWORD is set.'),
+    h(
+      'div',
+      { class: 'card table-wrap' },
+      h(
+        'table',
+        { style: 'min-width: 700px' },
+        h('thead', {}, h('tr', {}, ['Name', 'Email', 'Access', 'Last sign-in'].map((t) => h('th', {}, t)))),
+        h(
+          'tbody',
+          {},
+          h('tr', {}, h('td', { class: 'strong' }, 'Master admin'), h('td', {}, 'admin'), h('td', {}, 'Everything'), h('td', {}, '')),
+          users.map((u) =>
+            h(
+              'tr',
+              { class: 'click', tabindex: 0, onclick: () => userDialog(u), onkeydown: (e) => e.key === 'Enter' && userDialog(u) },
+              h('td', { class: 'strong' }, u.name),
+              h('td', {}, u.email),
+              h('td', {}, u.role === 'admin' ? 'Admin, all locations' : h('div', { class: 'chips' }, u.storeIds.map((id) => h('span', { class: 'chip' }, storeName(id))))),
+              h('td', {}, when(u.lastSignInAt)),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+function userDialog(user) {
+  const isNew = !user;
+  const u = user ? structuredClone(user) : { name: '', email: '', role: 'store', storeIds: [] };
+  let password = '';
+  const errors = h('div', {});
+  const field = (label, input, hint) => h('label', { class: 'field' }, h('span', {}, label), input, hint ? h('span', { class: 'hint' }, hint) : null);
+  const storePick = h(
+    'div',
+    { class: 'pills' },
+    boot.stores.map((st) =>
+      h(
+        'label',
+        { class: 'pill' },
+        h('input', { type: 'checkbox', checked: u.storeIds.includes(st.id), onchange: (e) => (u.storeIds = e.target.checked ? [...u.storeIds, st.id] : u.storeIds.filter((x) => x !== st.id)) }),
+        ` ${st.name}`,
+      ),
+    ),
+  );
+  const draw = () =>
+    openDialog(
+      h('h2', {}, isNew ? 'Add a user' : u.name),
+      h(
+        'div',
+        { class: 'grid2' },
+        field('Name', h('input', { value: u.name, oninput: (e) => (u.name = e.target.value) })),
+        field('Email (used to sign in)', h('input', { type: 'email', value: u.email, autocomplete: 'off', oninput: (e) => (u.email = e.target.value) })),
+      ),
+      field(
+        'Access',
+        h(
+          'div',
+          { class: 'pills', role: 'radiogroup' },
+          [
+            ['store', 'Store back office'],
+            ['admin', 'Admin (everything)'],
+          ].map(([v, l]) => h('button', { type: 'button', role: 'radio', 'aria-checked': u.role === v, class: `pill${u.role === v ? ' on' : ''}`, onclick: () => ((u.role = v), draw()) }, l)),
+        ),
+      ),
+      u.role === 'store' && field('Locations they can see and run offers for', storePick),
+      field(
+        isNew ? 'Starting password' : 'New password (leave blank to keep the current one)',
+        h('input', { type: 'text', autocomplete: 'new-password', value: password, oninput: (e) => (password = e.target.value) }),
+        'At least 8 characters. Share it with them privately. Changing it signs them out everywhere.',
+      ),
+      errors,
+      h(
+        'div',
+        { class: 'row' },
+        !isNew &&
+          h(
+            'button',
+            {
+              class: 'btn ghost',
+              onclick: async () => {
+                if (!confirm(`Remove ${u.name}? They will be signed out and lose access.`)) return;
+                await api('DELETE', `/users/${u.id}`);
+                closeDialog();
+                toast('User removed');
+                render();
+              },
+            },
+            'Remove user',
+          ),
+        h('div', { class: 'grow' }),
+        h('button', { class: 'btn ghost', onclick: closeDialog }, 'Cancel'),
+        h(
+          'button',
+          {
+            class: 'btn accent',
+            onclick: async () => {
+              try {
+                const body = { name: u.name.trim(), email: u.email.trim(), role: u.role, storeIds: u.role === 'store' ? u.storeIds : [] };
+                if (password) body.password = password;
+                if (isNew) await api('POST', '/users', body);
+                else await api('PUT', `/users/${u.id}`, body);
+                closeDialog();
+                toast(isNew ? 'User added' : 'User saved');
+                render();
+              } catch (err) {
+                errors.replaceChildren(errorBox(err));
+              }
+            },
+          },
+          isNew ? 'Add user' : 'Save',
+        ),
+      ),
+    );
+  draw();
+}
+
+// ---------- Items catalog ----------
+
+let itemQuery = '';
+
+async function renderItems() {
+  const r = await api('GET', `/items?q=${encodeURIComponent(itemQuery)}`);
+  const file = h('input', { type: 'file', accept: '.csv,.txt,text/csv', hidden: true });
+  const status = h('div', {});
+  file.onchange = async () => {
+    const f = file.files?.[0];
+    if (!f) return;
+    status.replaceChildren(h('p', { class: 'note' }, `Reading ${f.name}…`));
+    try {
+      const res = await api('POST', '/items/upload', { csv: await f.text(), fileName: f.name });
+      toast(`${res.count.toLocaleString()} items uploaded`);
+      itemQuery = '';
+      await renderItems();
+      if (res.skipped) main.prepend(h('div', { class: 'notice' }, `${res.skipped.toLocaleString()} rows were skipped because they had no SKU, UPC or name.`));
+    } catch (err) {
+      status.replaceChildren(errorBox(err));
+    }
+  };
+  const search = h('input', {
+    type: 'search',
+    placeholder: 'Search by name, SKU, UPC or department',
+    value: itemQuery,
+    'aria-label': 'Search items',
+    onkeydown: (e) => {
+      if (e.key === 'Enter') {
+        itemQuery = e.target.value;
+        renderItems();
+      }
+    },
+  });
+  main.replaceChildren(
+    pageHead(
+      'Items',
+      r.count
+        ? `${r.count.toLocaleString()} items from ${r.fileName || 'the last upload'}, uploaded ${new Date(r.uploadedAt).toLocaleString()}. Item rewards will be tied to these SKUs and UPCs.`
+        : 'Upload your latest pricebook so item rewards can be tied to exact SKUs and UPCs.',
+      h('button', { class: 'btn accent', onclick: () => file.click() }, r.count ? 'Upload a new catalog' : 'Upload catalog'),
+      file,
+    ),
+    status,
+    h(
+      'p',
+      { class: 'note' },
+      'Use a CSV export from your back office or POS. The first row names the columns: SKU or Item code, UPC, Name or Description, Department, Price. A new upload replaces the whole catalog.',
+    ),
+    r.count > 0 && h('div', { class: 'row' }, search, h('span', { class: 'note' }, `${r.total.toLocaleString()} match${r.total === 1 ? '' : 'es'}${r.total > r.items.length ? `, showing the first ${r.items.length}` : ''}`)),
+    r.count > 0 &&
+      h(
+        'div',
+        { class: 'card table-wrap' },
+        h(
+          'table',
+          { style: 'min-width: 700px' },
+          h('thead', {}, h('tr', {}, ['SKU', 'UPC', 'Name', 'Department', 'Category', 'Price'].map((t, i) => h('th', { class: i === 5 ? 'num' : '' }, t)))),
+          h(
+            'tbody',
+            {},
+            r.items.map((i) =>
+              h(
+                'tr',
+                {},
+                h('td', {}, i.sku),
+                h('td', {}, i.upc ?? ''),
+                h('td', { class: 'strong' }, i.name),
+                h('td', {}, i.department ?? ''),
+                h('td', {}, i.category ? catLabel(i.category) : ''),
+                h('td', { class: 'num' }, i.priceCents === undefined ? '' : money(i.priceCents)),
+              ),
+            ),
+          ),
+        ),
+      ),
   );
 }
 
 // ---------- router ----------
 
 async function render() {
+  if (!boot) return showLogin();
   const [page, id] = location.hash.replace(/^#\/?/, '').split('/');
   const section = page || 'offers';
   for (const a of document.querySelectorAll('[data-nav]')) {
@@ -1876,13 +2536,15 @@ async function render() {
   try {
     if (section === 'offers' && id) return renderOfferForm(id);
     form = null;
-    if (section === 'rules') return renderRules();
-    if (section === 'stores') return renderStores();
+    if (section === 'rules' && isAdmin()) return renderRules();
+    if (section === 'stores' && isAdmin()) return renderStores();
     if (section === 'members') return await renderMembers();
     if (section === 'results') return await renderResults();
+    if (section === 'users' && isAdmin()) return await renderUsers();
+    if (section === 'items' && isAdmin()) return await renderItems();
     return renderOffers();
   } catch (err) {
-    main.replaceChildren(errorBox(err));
+    if (!err.signIn) main.replaceChildren(errorBox(err));
   }
 }
 
@@ -1894,4 +2556,4 @@ window.addEventListener('hashchange', () => {
 
 reload()
   .then(render)
-  .catch((err) => main.replaceChildren(errorBox(err)));
+  .catch((err) => err.signIn || main.replaceChildren(errorBox(err)));

@@ -2,6 +2,7 @@ import type { Role, Rule } from './types.js';
 
 /** Limits the jobber sets on what store managers may create. Editable in the console. */
 export interface StorePolicy {
+  /** 0 means no cap. */
   maxStoreDiscountCents: number;
   storeManagersCanCreate: boolean;
 }
@@ -34,15 +35,15 @@ export function ruleViolations(rule: Rule, actor: Actor, policy: StorePolicy): s
 
   // store-manager
   if (!policy.storeManagersCanCreate) problems.push('Store managers cannot create offers right now.');
-  if (rule.scope.kind !== 'stores' || rule.scope.storeIds.length !== 1 || rule.scope.storeIds[0] !== actor.storeId)
-    problems.push('Store managers can only target their own store.');
+  const own = actor.storeIds ?? (actor.storeId ? [actor.storeId] : []);
+  if (rule.scope.kind !== 'stores' || !rule.scope.storeIds.length || !rule.scope.storeIds.every((id) => own.includes(id)))
+    problems.push('Store managers can only target their own stores.');
   if (e.type === 'fuelDiscount') problems.push('Fuel discounts are set by the jobber.');
   if (e.type.startsWith('points')) problems.push('Earn rules are set by the jobber.');
   if (e.type === 'itemDiscount' && e.costPoints) problems.push('Points redemptions are set by the jobber.');
-  if (e.type === 'itemDiscount' && (e.centsOff ?? 0) > policy.maxStoreDiscountCents)
-    problems.push(`Discount is above the store limit of ${policy.maxStoreDiscountCents} cents.`);
-  if (e.type === 'basketDiscount' && e.centsOff > policy.maxStoreDiscountCents)
-    problems.push(`Discount is above the store limit of ${policy.maxStoreDiscountCents} cents.`);
+  const cap = policy.maxStoreDiscountCents;
+  if (cap > 0 && e.type === 'itemDiscount' && (e.centsOff ?? 0) > cap) problems.push(`Discount is above the store limit of ${cap} cents.`);
+  if (cap > 0 && e.type === 'basketDiscount' && e.centsOff > cap) problems.push(`Discount is above the store limit of ${cap} cents.`);
   if (rule.fundedBy !== 'store') problems.push('Store-created offers must be store-funded.');
   return problems;
 }

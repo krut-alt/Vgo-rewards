@@ -21,6 +21,7 @@ import type {
   ProgramSettings,
   StoreGroup,
 } from './model.js';
+import { migrate } from './migrate.js';
 import { ruleProblems } from './validate.js';
 
 export class ConsoleError extends Error {
@@ -63,11 +64,16 @@ function periodStart(ymd: string, period: Period): string {
 export { withoutNulls };
 
 export class Repo {
+  /** True when loading applied data updates that still need saving. */
+  readonly migrated: boolean;
+
   constructor(
     public data: ConsoleData,
     private readonly persist: (data: ConsoleData) => void = () => {},
     private readonly clock: () => Date = () => new Date(),
-  ) {}
+  ) {
+    this.migrated = migrate(data);
+  }
 
   static open(file: string, seed: () => ConsoleData): Repo {
     const data = existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as ConsoleData) : seed();
@@ -76,7 +82,7 @@ export class Repo {
       writeFileSync(tmp, JSON.stringify(d));
       renameSync(tmp, file);
     });
-    if (!existsSync(file)) repo.save();
+    if (!existsSync(file) || repo.migrated) repo.save();
     return repo;
   }
 
@@ -111,6 +117,7 @@ export class Repo {
         this.data.groups.map((g) => g.id),
       ),
       ...(rule.effect && rule.scope ? ruleViolations(rule, actor, this.policy()) : []),
+      ...(rule.artwork?.mediaId && !this.data.media?.some((m) => m.id === rule.artwork!.mediaId) ? ['That artwork was removed. Upload it again.'] : []),
     ];
   }
 
@@ -171,13 +178,30 @@ export class Repo {
 
   upsertStore(store: ConsoleStore, actor: Actor): ConsoleStore {
     if (actor.role !== 'jobber-admin') throw new ConsoleError('Only a jobber admin can change stores.', 403);
-    if (!store.id || !store.name?.trim()) throw new ConsoleError('A store needs an id and a name.');
+    if (!store.name?.trim()) throw new ConsoleError('A location needs a site name.');
+    store = { ...store, groupIds: store.groupIds ?? [], mappedCategories: store.mappedCategories ?? [], name: store.name.trim() };
+    if (!store.id) {
+      const base = slug(store.name) || 'store';
+      let id = base;
+      for (let n = 2; this.data.stores.some((s) => s.id === id); n++) id = `${base}-${n}`;
+      store.id = id;
+    }
+    if (!/^[A-Za-z]{2}$/.test(store.state ?? '')) throw new ConsoleError('Use the two-letter state, like SC.');
+    store.state = store.state.toUpperCase();
+    if (store.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(store.email)) throw new ConsoleError('That email address doesn’t look right.');
+    if (store.phone) {
+      store.phone = store.phone.replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
+      if (store.phone.length !== 10) throw new ConsoleError('Enter a 10-digit phone number.');
+    }
+    if ((store.lat === undefined) !== (store.lng === undefined)) throw new ConsoleError('Enter both latitude and longitude, or neither.');
+    if (store.lat !== undefined && (!Number.isFinite(store.lat) || Math.abs(store.lat) > 90 || !Number.isFinite(store.lng) || Math.abs(store.lng!) > 180))
+      throw new ConsoleError('That map location doesn’t look right. Use decimal latitude and longitude, like 34.85, -82.39.');
     const unknown = store.groupIds.filter((g) => !this.data.groups.some((x) => x.id === g));
     if (unknown.length) throw new ConsoleError(`Unknown store group ${unknown[0]}.`);
     const i = this.data.stores.findIndex((s) => s.id === store.id);
     if (i >= 0) this.data.stores[i] = store;
     else this.data.stores.push(store);
-    this.log(actor, `${i >= 0 ? 'Updated' : 'Added'} store ${store.name}${store.loyaltyLive ? ' (loyalty live)' : ''}`);
+    this.log(actor, `${i >= 0 ? 'Updated' : 'Added'} location ${store.name}${store.loyaltyLive ? ' (loyalty live)' : ''}`);
     this.save();
     return store;
   }
@@ -206,6 +230,18 @@ export class Repo {
   member(id: string): ConsoleMember {
     const m = this.data.members.find((x) => x.id === id);
     if (!m) throw new ConsoleError('Member not found.', 404);
+    return m;
+  }
+
+  /**
+   * Finds a member by what the customer gave at checkout: the phone number typed on the PIN pad
+   * or the app barcode (which carries the same number). A leading US 1 is ignored.
+   */
+  memberByLoyaltyId(raw: unknown): ConsoleMember {
+    let digits = String(raw ?? '').replace(/\D/g, '');
+    if (digits.length === 11 && digits.startsWith('1')) digits = digits.slice(1);
+    const m = digits.length === 10 ? this.data.members.find((x) => x.phone === digits) : undefined;
+    if (!m) throw new ConsoleError('No member with that phone number.', 404);
     return m;
   }
 

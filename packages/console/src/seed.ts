@@ -244,7 +244,7 @@ export function seedData(now = new Date()): ConsoleData {
     settings: {
       pointsExpireMonths: 12,
       fuelStacking: { mode: 'best' },
-      maxStoreDiscountCents: 200,
+      maxStoreDiscountCents: 0,
       storeManagersCanCreate: true,
       monthlyBudgetCents: 500_000,
     },

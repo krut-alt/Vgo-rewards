@@ -118,7 +118,7 @@ function signOutLocal() {
 
 // ---------- sign up and sign in ----------
 
-let joinState = { mode: 'join', step: 'details', phone: '', firstName: '', smsOptIn: true, homeStoreId: null, devCode: null, error: null };
+let joinState = { mode: 'join', step: 'details', phone: '', firstName: '', email: '', emailOptIn: true, smsOptIn: true, homeStoreId: null, devCode: null, error: null };
 
 function renderJoin() {
   const s = joinState;
@@ -136,6 +136,13 @@ function renderJoin() {
         h(
           'div',
           { class: 'field' },
+          h('label', { for: 'email' }, 'Email (optional)'),
+          h('input', { id: 'email', type: 'email', autocomplete: 'email', inputmode: 'email', placeholder: 'you@example.com', value: s.email, oninput: (e) => (s.email = e.target.value) }),
+          h('span', { class: 'hint' }, 'For receipts and offers by email. You still sign in with your phone.'),
+        ),
+        h(
+          'div',
+          { class: 'field' },
           h('label', { for: 'home' }, 'Your store'),
           h(
             'select',
@@ -149,6 +156,7 @@ function renderJoin() {
           h('input', { type: 'checkbox', checked: s.smsOptIn, onchange: (e) => (s.smsOptIn = e.target.checked) }),
           'Text me offers from my store. Msg and data rates may apply. Reply STOP to opt out.',
         ),
+        h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: s.emailOptIn, onchange: (e) => (s.emailOptIn = e.target.checked) }), 'Email me offers too, if I added an email'),
       ],
       err,
       h('div', { style: 'flex:1' }),
@@ -184,6 +192,8 @@ function renderJoin() {
         lockup(true),
         h('h1', {}, s.mode === 'join' ? w.headline : 'Welcome back'),
         h('p', {}, s.mode === 'join' ? 'Join free with your phone number. Earn points inside the store and at the pump, then save on fuel.' : 'Sign in with the phone number you joined with.'),
+        s.mode === 'join' && w.imageUrl && h('div', { class: 'join-art' }, h('img', { src: w.imageUrl, alt: '' })),
+        s.mode === 'join' && h('div', { class: 'perks' }, ['Points at the pump', 'Points inside', 'Member-only deals'].map((t) => h('span', {}, svg(ICONS.check), t))),
       ),
       h('section', { class: 'join-form' }, form),
     ),
@@ -195,6 +205,7 @@ async function sendCode() {
   const digits = s.phone.replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
   if (digits.length !== 10) return ((s.error = 'Enter your 10-digit mobile number.'), renderJoin());
   if (s.mode === 'join' && !s.firstName.trim()) return ((s.error = 'Enter your first name.'), renderJoin());
+  if (s.mode === 'join' && s.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.email.trim())) return ((s.error = 'Check the email address, or leave it blank.'), renderJoin());
   try {
     const res = await api('POST', '/code', { phone: digits });
     Object.assign(s, { phone: digits, step: 'code', devCode: res.devCode ?? null, error: null });
@@ -210,7 +221,7 @@ async function verifyCode(code) {
     const res = await api('POST', '/verify', {
       phone: s.phone,
       code,
-      ...(s.mode === 'join' ? { firstName: s.firstName, smsOptIn: s.smsOptIn, homeStoreId: s.homeStoreId } : {}),
+      ...(s.mode === 'join' ? { firstName: s.firstName, smsOptIn: s.smsOptIn, homeStoreId: s.homeStoreId, email: s.email.trim(), emailOptIn: s.emailOptIn } : {}),
     });
     if (res.needsSignup) {
       // Signed in with a number that isn't a member yet: collect a name, then the same code still works.
@@ -240,28 +251,65 @@ function frame(active, ...children) {
   root.replaceChildren(h('div', { class: 'screen' }, ...children), tabs(active));
 }
 
-function offerCard(o, onChange) {
-  let action;
-  if (o.how === 'clip') {
-    action = o.clipped
-      ? h('div', { class: 'between' }, h('div', { class: 'added' }, svg(ICONS.check), 'Added to your card'), h('button', { class: 'switch-mode', onclick: () => clip(o, false, onChange) }, 'Remove'))
+/** The 16:9 picture on every reward: uploaded artwork, or the headline on a colored banner. */
+function artFrame(o, extra = '') {
+  if (o.imageUrl) return h('div', { class: `art ${extra}` }, h('img', { src: o.imageUrl, alt: '', loading: 'lazy', decoding: 'async' }));
+  return h('div', { class: `art poster ${o.kind || 'other'} ${extra}` }, h('span', { class: 'poster-text' }, o.headline), h('img', { class: 'poster-logo', src: config.branding.logoDataUrl || '/app/vgo-logo.png', alt: '' }));
+}
+
+function offerAction(o, onChange) {
+  if (o.how === 'clip')
+    return o.clipped
+      ? h('div', { class: 'between' }, h('div', { class: 'added' }, svg(ICONS.check), 'On your card'), h('button', { class: 'switch-mode', onclick: () => clip(o, false, onChange) }, 'Remove'))
       : h('button', { class: `pill-btn${o.kind === 'brand' ? ' outline' : ''}`, style: 'align-self:flex-start', onclick: () => clip(o, true, onChange) }, 'Add to card');
-  } else {
-    action = h('div', { class: 'added' }, svg(ICONS.check), o.how === 'auto-pump' ? 'Applies at the pump when you enter your phone' : o.how === 'punch' ? 'Counts automatically at the register' : 'Applies automatically at the register');
-  }
+  return h('div', { class: 'added' }, svg(ICONS.check), o.how === 'auto-pump' ? 'Applies at the pump when you enter your phone' : o.how === 'punch' ? 'Counts automatically at the register' : 'Applies automatically at the register');
+}
+
+function offerCard(o, onChange) {
   return h(
     'article',
-    { class: 'card' },
-    h('div', { class: 'between' }, h('span', { class: `kicker${o.kind === 'brand' ? ' brand' : ''}` }, o.kicker), o.ends && h('span', { class: 'sub' }, `Ends ${o.ends}`)),
-    h('span', { class: 'title' }, o.name),
-    h('span', { class: 'sub' }, o.line),
-    action,
+    { class: 'promo' },
+    h('div', { class: 'art-wrap' }, artFrame(o), o.nearby && h('span', { class: 'ribbon' }, svg(ICONS.pin), 'Near you'), o.ends && h('span', { class: 'ends' }, `Ends ${o.ends}`)),
+    h(
+      'div',
+      { class: 'promo-body' },
+      h('span', { class: `kicker${o.kind === 'brand' ? ' brand' : ''}` }, o.kicker),
+      h('span', { class: 'title' }, o.name),
+      h('span', { class: 'sub' }, o.line),
+      offerAction(o, onChange),
+    ),
   );
+}
+
+/** Big swipeable banners at the top of home. */
+function featuredSlider(list) {
+  if (!list.length) return null;
+  const dots = h('div', { class: 'dots' }, list.map((_, i) => h('span', { class: i === 0 ? 'on' : '' })));
+  const track = h(
+    'div',
+    {
+      class: 'slider',
+      onscroll: (e) => {
+        const i = Math.round(e.target.scrollLeft / e.target.clientWidth);
+        [...dots.children].forEach((d, j) => d.classList.toggle('on', i === j));
+      },
+    },
+    list.map((o) =>
+      h(
+        'a',
+        { class: 'slide', href: '#/offers', 'aria-label': o.name },
+        artFrame(o),
+        h('div', { class: 'slide-cap' }, h('span', { class: 'slide-kicker' }, o.kicker.split(' · ')[0]), h('span', { class: 'slide-title' }, o.name), h('span', { class: 'slide-cta' }, o.how === 'clip' && !o.clipped ? 'Add to card' : 'See offer')),
+      ),
+    ),
+  );
+  return h('section', { class: 'featured', 'aria-label': 'Featured offers' }, track, list.length > 1 && dots);
 }
 
 async function clip(o, on, onChange) {
   try {
-    await api(on ? 'POST' : 'DELETE', `/offers/${o.ruleId}/clip`);
+    if (on && o.nearby && !here) here = await locate();
+    await api(on ? 'POST' : 'DELETE', `/offers/${o.ruleId}/clip`, on && here ? { lat: here.lat, lng: here.lng } : undefined);
     toast(on ? 'Added to your card' : 'Removed from your card');
     onChange();
   } catch (e) {
@@ -283,6 +331,7 @@ async function renderHome() {
     h(
       'main',
       { class: 'content' },
+      featuredSlider(me.featured ?? []),
       h(
         'section',
         { class: 'points' },
@@ -328,7 +377,19 @@ async function renderHome() {
         { style: 'display:flex;flex-direction:column;gap:10px' },
         h('div', { class: 'section-head' }, h('b', {}, 'Offers for you'), h('a', { href: '#/offers' }, 'See all')),
         me.offers.length
-          ? me.offers.map((o) => h('a', { class: 'card', href: '#/offers', style: 'text-decoration:none;color:inherit;font-weight:400' }, h('span', { class: 'title', style: 'font-size:18px' }, o.name), h('span', { class: 'sub' }, `${o.kicker.split(' · ')[1] ?? ''}${o.ends ? ` · ends ${o.ends}` : ''}`)))
+          ? h(
+              'div',
+              { class: 'strip' },
+              me.offers.map((o) =>
+                h(
+                  'a',
+                  { class: 'mini', href: '#/offers' },
+                  artFrame(o),
+                  h('span', { class: 'mini-title' }, o.name),
+                  h('span', { class: 'sub' }, `${o.kicker.split(' · ')[1] ?? ''}${o.ends ? ` · ends ${o.ends}` : ''}`),
+                ),
+              ),
+            )
           : h('div', { class: 'card sub' }, 'New offers show up here.'),
       ),
     ),
@@ -337,9 +398,46 @@ async function renderHome() {
 
 let offerFilter = 'all';
 let offerStoreId = null;
+// The phone's location, only after the member asks for near-store deals. Never stored.
+let here = null;
+let locating = false;
+
+function locate() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject(new Error('This phone can’t share its location with the app.'));
+    navigator.geolocation.getCurrentPosition(
+      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+      (e) => reject(new Error(e.code === 1 ? 'Location is off for this app. Turn it on in your browser settings to see deals near you.' : 'Couldn’t find your location. Try again.')),
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 120000 },
+    );
+  });
+}
+
+async function findNearby() {
+  locating = true;
+  renderOffers();
+  try {
+    here = await locate();
+  } catch (e) {
+    toast(e.message);
+  }
+  locating = false;
+  renderOffers();
+}
+
+// If the member already allowed location, refresh it quietly so near-store deals show up.
+async function refreshHereIfAllowed() {
+  try {
+    const p = await navigator.permissions?.query({ name: 'geolocation' });
+    if (p?.state === 'granted') here = await locate();
+  } catch {}
+}
 
 async function renderOffers() {
-  const res = await api('GET', `/offers${offerStoreId ? `?storeId=${encodeURIComponent(offerStoreId)}` : ''}`);
+  const q = new URLSearchParams();
+  if (offerStoreId) q.set('storeId', offerStoreId);
+  if (here) q.set('lat', String(here.lat)), q.set('lng', String(here.lng));
+  const res = await api('GET', `/offers${q.size ? `?${q}` : ''}`);
   const shown = res.offers.filter((o) => offerFilter === 'all' || o.kind === offerFilter);
   const filter = (id, label) => h('button', { class: `filter${offerFilter === id ? ' on' : ''}`, 'aria-pressed': offerFilter === id, onclick: () => ((offerFilter = id), renderOffers()) }, label);
   frame(
@@ -351,7 +449,20 @@ async function renderOffers() {
       h('button', { class: 'store-btn', onclick: pickStore }, svg(ICONS.pin), h('span', { style: 'flex:1' }, 'Showing offers at ', h('strong', {}, storeLabel(res.store))), h('span', { style: 'font-weight:600' }, 'Change')),
       h('div', { class: 'filters' }, filter('all', 'All'), filter('fuel', 'Fuel'), filter('food', 'Food and drink'), filter('brand', 'Brands')),
     ),
-    h('main', { class: 'content' }, shown.length ? shown.map((o) => offerCard(o, renderOffers)) : h('div', { class: 'empty-state' }, 'No offers here right now. Check back soon.')),
+    h(
+      'main',
+      { class: 'content' },
+      res.nearbyOffers &&
+        !here &&
+        h(
+          'section',
+          { class: 'card row' },
+          svg(ICONS.pin),
+          h('span', { style: 'flex:1;font-size:15px' }, 'Some deals only unlock when you’re at the store.'),
+          h('button', { class: 'pill-btn', disabled: locating, onclick: findNearby }, locating ? 'Finding you…' : 'Show deals near me'),
+        ),
+      shown.length ? shown.map((o) => offerCard(o, renderOffers)) : h('div', { class: 'empty-state' }, 'No offers here right now. Check back soon.'),
+    ),
   );
 }
 
@@ -476,6 +587,7 @@ async function renderUse() {
                   save(next);
                 },
               }),
+              h('div', { class: 'choice-art' }, artFrame({ ...r, kind: 'food' })),
               h('span', { class: 'grow' }, h('span', { class: 'title', style: 'font-size:18px' }, r.title), h('span', { class: 'sub' }, r.affordable ? r.detail : `Needs ${r.costPoints} points · you have ${m.points}`)),
             ),
           ),
@@ -506,14 +618,64 @@ async function renderAccount() {
           h('label', { for: 'acct-store' }, 'Home store'),
           h('select', { id: 'acct-store' }, config.stores.map((s) => h('option', { value: s.id, selected: s.id === m.homeStore.id }, `${storeLabel(s)}${s.loyaltyLive ? '' : ' (coming soon)'}`))),
         ),
+        h(
+          'div',
+          { class: 'field' },
+          h('label', { for: 'acct-email' }, 'Email (optional)'),
+          h('input', { id: 'acct-email', type: 'email', inputmode: 'email', autocomplete: 'email', value: m.email }),
+          h('span', { class: 'hint' }, 'Your phone number stays your member ID and how you sign in.'),
+        ),
+        h(
+          'div',
+          { class: 'field' },
+          h('span', { class: 'label', id: 'bday-label' }, 'Birthday (optional)'),
+          h(
+            'div',
+            { class: 'two', role: 'group', 'aria-labelledby': 'bday-label' },
+            h(
+              'select',
+              { id: 'acct-bmonth', 'aria-label': 'Month' },
+              h('option', { value: '' }, 'Month'),
+              ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((mo, i) => h('option', { value: String(i + 1).padStart(2, '0'), selected: m.birthday.slice(0, 2) === String(i + 1).padStart(2, '0') }, mo)),
+            ),
+            h(
+              'select',
+              { id: 'acct-bday', 'aria-label': 'Day' },
+              h('option', { value: '' }, 'Day'),
+              Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, '0')).map((d) => h('option', { value: d, selected: m.birthday.slice(3) === d }, String(Number(d)))),
+            ),
+          ),
+          h('span', { class: 'hint' }, 'We may send you a treat on your birthday. No year needed.'),
+        ),
+        h(
+          'div',
+          { class: 'field' },
+          h('label', { for: 'acct-zip' }, 'ZIP code (optional)'),
+          h('input', { id: 'acct-zip', type: 'text', inputmode: 'numeric', autocomplete: 'postal-code', maxlength: 5, value: m.zip }),
+        ),
         h('label', { class: 'check' }, h('input', { id: 'acct-sms', type: 'checkbox', checked: m.smsOptIn }), 'Text me offers from my store'),
+        h('label', { class: 'check' }, h('input', { id: 'acct-email-optin', type: 'checkbox', checked: m.emailOptIn }), 'Email me offers'),
         h(
           'button',
           {
             class: 'cta',
             onclick: async () => {
               try {
-                await api('PUT', '/me', { firstName: name.value, homeStoreId: document.getElementById('acct-store').value, smsOptIn: document.getElementById('acct-sms').checked });
+                await api('PUT', '/me', {
+                  firstName: name.value,
+                  homeStoreId: document.getElementById('acct-store').value,
+                  smsOptIn: document.getElementById('acct-sms').checked,
+                  email: document.getElementById('acct-email').value,
+                  emailOptIn: document.getElementById('acct-email-optin').checked,
+                  birthday: (() => {
+                    const mo = document.getElementById('acct-bmonth').value;
+                    const d = document.getElementById('acct-bday').value;
+                    if (!mo && !d) return '';
+                    if (!mo || !d) throw new Error('Pick both the month and day of your birthday.');
+                    return `${mo}-${d}`;
+                  })(),
+                  zip: document.getElementById('acct-zip').value,
+                });
                 toast('Saved');
                 renderAccount();
               } catch (e) {
@@ -571,7 +733,10 @@ async function render() {
   if (!token) return renderJoin();
   const page = location.hash.replace(/^#\/?/, '') || 'home';
   try {
-    if (page === 'offers') return await renderOffers();
+    if (page === 'offers') {
+      if (!here) await refreshHereIfAllowed();
+      return await renderOffers();
+    }
     if (page === 'use') return await renderUse();
     if (page === 'account') return await renderAccount();
     return await renderHome();

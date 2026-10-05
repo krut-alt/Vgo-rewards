@@ -20,10 +20,18 @@ export function ruleChecks(repo: Repo, rule: ConsoleRule, actor: Actor): { block
 
   const targeted = stores.filter((s) => inScope(rule.scope, s));
   if (!targeted.length) checks.push({ ok: false, text: 'No stores are in this target yet.' });
+  if (rule.geofence) {
+    const unmapped = targeted.filter((s) => s.lat === undefined);
+    checks.push(
+      unmapped.length
+        ? { ok: false, text: `Near-store offer: ${unmapped.map((s) => s.name).join(', ')} ${unmapped.length === 1 ? 'has' : 'have'} no map location, so members there won't see it. Add it on Locations.` }
+        : { ok: true, text: `Near-store offer: shown in the app within ${rule.geofence.radiusMiles} mi of ${targeted.length === 1 ? targeted[0]!.name : `${targeted.length} stores`}` },
+    );
+  }
 
   if (rule.fundedBy === 'store' || rule.fundedBy === 'split') {
     const off = e.type === 'itemDiscount' ? (e.centsOff ?? 0) : e.type === 'basketDiscount' ? e.centsOff : 0;
-    if (off)
+    if (off && settings.maxStoreDiscountCents > 0)
       checks.push(
         off <= settings.maxStoreDiscountCents
           ? { ok: true, text: `Within the store's max discount of ${money(settings.maxStoreDiscountCents)}` }
