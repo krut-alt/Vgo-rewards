@@ -22,6 +22,7 @@ export function twilioConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Twili
 // Twilio error codes a member can do something about.
 const TWILIO_MESSAGES: Record<number, string> = {
   21211: 'That phone number is not valid.',
+  21266: 'That is our texting number. Enter your own mobile number.',
   21608: 'This number is not on the test list yet. Ask VGO to add it.', // trial accounts text verified numbers only
   21610: 'This number has opted out of texts. Text START to our number, then try again.',
   21614: 'That number can’t receive texts. Use a mobile number.',

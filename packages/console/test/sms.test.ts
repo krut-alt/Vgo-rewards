@@ -31,6 +31,11 @@ describe('Twilio texts', () => {
     await expect(twilioSender(config, f.impl)('8035550199', 'x')).rejects.toThrow(/not on the test list/);
   });
 
+  it('explains texting the program's own number', async () => {
+    const f = fakeFetch(400, { code: 21266, message: 'To and From cannot be the same' });
+    await expect(twilioSender(config, f.impl)('8035550000', 'x')).rejects.toThrow(/our texting number/);
+  });
+
   it('gives a generic message for other failures', async () => {
     const f = fakeFetch(500, { code: 20500 });
     await expect(twilioSender(config, f.impl)('8035550199', 'x')).rejects.toMatchObject({ status: 502 });
