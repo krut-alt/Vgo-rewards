@@ -1,0 +1,18 @@
+{
+  "name": "vgo-rewards",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "VGO Rewards: jobber-owned c-store loyalty platform",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "tsc"
+  },
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
+  }
+}
