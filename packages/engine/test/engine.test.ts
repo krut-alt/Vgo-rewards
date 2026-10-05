@@ -88,21 +88,43 @@ describe('fuel discounts', () => {
   });
 
   it('applies only the best fuel discount', () => {
-    const res = evaluate([welcome, redeem], pilot, tx({ fuel }), member({ visitCount: 0, pointsBalance: 500 }));
+    const res = evaluate([welcome, redeem], pilot, tx({ fuel, redeemRuleIds: ['redeem'] }), member({ visitCount: 0, pointsBalance: 500 }));
     expect(res.appliedRuleIds).toEqual(['welcome']);
     expect(res.pointsSpent).toBe(0);
   });
 
+  const chosen = { redeemRuleIds: ['redeem'] };
+
   it('spends points only when the member has enough', () => {
-    expect(evaluate([redeem], pilot, tx({ fuel }), member({ pointsBalance: 99 })).discounts).toHaveLength(0);
-    const res = evaluate([redeem], pilot, tx({ fuel }), member({ pointsBalance: 150 }));
+    expect(evaluate([redeem], pilot, tx({ fuel, ...chosen }), member({ pointsBalance: 99 })).discounts).toHaveLength(0);
+    const res = evaluate([redeem], pilot, tx({ fuel, ...chosen }), member({ pointsBalance: 150 }));
     expect(res.pointsSpent).toBe(100);
     expect(res.discounts[0]?.centsOff).toBe(150);
   });
 
+  it('spends points only when the member picked the redemption', () => {
+    expect(evaluate([redeem], pilot, tx({ fuel }), member({ pointsBalance: 500 })).discounts).toHaveLength(0);
+  });
+
   it('authorizes a pump discount before gallons are known', () => {
-    const res = evaluate([redeem], pilot, tx(), member({ pointsBalance: 150 }));
+    const res = evaluate([redeem], pilot, tx(chosen), member({ pointsBalance: 150 }));
     expect(res.discounts[0]).toMatchObject({ centsPerGallon: 10, maxGallons: 20, centsOff: 0 });
+  });
+
+  it('stacks fuel discounts up to a cap when the program allows it', () => {
+    const tuesday = rule({ id: 'tuesday', effect: { type: 'fuelDiscount', centsPerGallon: 5, maxGallons: 20 } });
+    const res = evaluate([welcome, tuesday], pilot, tx({ fuel }), member({ visitCount: 0 }), undefined, {
+      fuelStacking: { mode: 'stack', maxCentsPerGallon: 28 },
+    });
+    expect(res.discounts.map((d) => d.centsPerGallon)).toEqual([25, 3]);
+    expect(res.discounts[1]?.centsOff).toBe(45);
+  });
+
+  it('stops a rule once its monthly budget is used up', () => {
+    const capped = { ...welcome, monthlyBudgetCents: 1000 };
+    const first = member({ visitCount: 0 });
+    expect(evaluate([capped], pilot, tx({ fuel }), first, undefined, { budgetUsed: () => 600 }).discounts).toHaveLength(1);
+    expect(evaluate([capped], pilot, tx({ fuel }), first, undefined, { budgetUsed: () => 700 }).discounts).toHaveLength(0);
   });
 });
 
@@ -122,6 +144,16 @@ describe('limits and schedules', () => {
 
   it('respects per-member limits', () => {
     expect(evaluate([r], pilot, tx({ items, localHour: 15 }), member(), () => 1).discounts).toHaveLength(0);
+  });
+});
+
+describe('item redemptions', () => {
+  const drink = rule({ id: 'free-drink', effect: { type: 'itemDiscount', categories: ['fountain'], percentOff: 100, maxQty: 1, costPoints: 300 } });
+  const items = [{ sku: 'f', category: 'fountain', qty: 1, unitCents: 189 }];
+
+  it('makes the item free for points when the member picks it', () => {
+    const res = evaluate([drink], pilot, tx({ items, redeemRuleIds: ['free-drink'] }), member({ pointsBalance: 300 }));
+    expect(res).toMatchObject({ pointsSpent: 300, discounts: [{ centsOff: 189 }] });
   });
 });
 

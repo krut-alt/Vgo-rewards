@@ -2,6 +2,7 @@ import type {
   AppliedDiscount,
   Condition,
   Effect,
+  EvaluateOptions,
   EvaluationResult,
   LineItem,
   Member,
@@ -69,6 +70,16 @@ function underLimit(rule: Rule, usage: UsageLookup): boolean {
   return usage(rule.id, rule.perMemberLimit.period) < rule.perMemberLimit.count;
 }
 
+function costPointsOf(rule: Rule): number {
+  const e = rule.effect;
+  return e.type === 'fuelDiscount' || e.type === 'itemDiscount' ? (e.costPoints ?? 0) : 0;
+}
+
+/** Points redemptions apply only when the member picked them for this visit. */
+function chosenIfRedemption(rule: Rule, tx: Transaction): boolean {
+  return costPointsOf(rule) === 0 || (tx.redeemRuleIds?.includes(rule.id) ?? false);
+}
+
 /** Rules that can apply to this transaction, before stacking and point checks. */
 export function eligibleRules(
   rules: Rule[],
@@ -82,14 +93,15 @@ export function eligibleRules(
       r.status === 'active' &&
       inScope(r.scope, store) &&
       inSchedule(r, tx) &&
+      chosenIfRedemption(r, tx) &&
       r.conditions.every((c) => conditionPasses(c, tx, member)) &&
       underLimit(r, usage),
   );
 }
 
-function stackingGroupOf(rule: Rule): string {
+function stackingGroupOf(rule: Rule, fuelStacks: boolean): string {
   if (rule.stackingGroup) return rule.stackingGroup;
-  return rule.effect.type === 'fuelDiscount' ? 'fuel' : `rule:${rule.id}`;
+  return rule.effect.type === 'fuelDiscount' && !fuelStacks ? 'fuel' : `rule:${rule.id}`;
 }
 
 function unitsOf(tx: Transaction, skus?: string[], categories?: string[]): number[] {
@@ -157,7 +169,8 @@ function outcomeOf(rule: Rule, tx: Transaction, member: Member): Outcome {
       return {
         ...base,
         value: centsOff,
-        discount: { ruleId: rule.id, kind: 'item', centsOff, fundedBy: rule.fundedBy },
+        pointsCost: e.costPoints ?? 0,
+        discount: { ruleId: rule.id, kind: 'item', centsOff, pointsSpent: e.costPoints, fundedBy: rule.fundedBy },
       };
     }
     case 'basketDiscount': {
@@ -201,12 +214,20 @@ export function evaluate(
   tx: Transaction,
   member: Member,
   usage: UsageLookup = () => 0,
+  options: EvaluateOptions = {},
 ): EvaluationResult {
-  // Rules the member cannot afford with points are dropped before stacking,
-  // so they never crowd out a rule the member can use.
+  const budgetUsed = options.budgetUsed ?? (() => 0);
+  const stacking = options.fuelStacking ?? { mode: 'best' };
+
+  // Rules the member cannot afford with points, and rules that would overrun their
+  // monthly budget, are dropped before stacking so they never crowd out a usable rule.
   const outcomes = eligibleRules(rules, store, tx, member, usage)
     .map((r) => outcomeOf(r, tx, member))
-    .filter((o) => o.pointsCost <= member.pointsBalance);
+    .filter((o) => o.pointsCost <= member.pointsBalance)
+    .filter((o) => {
+      const budget = o.rule.monthlyBudgetCents;
+      return budget === undefined || !o.discount || budgetUsed(o.rule.id) + o.value <= budget;
+    });
 
   // Best outcome per stacking group: highest value, then fewest points spent, then priority.
   const better = (a: Outcome, b: Outcome): boolean =>
@@ -217,7 +238,7 @@ export function evaluate(
         : (a.rule.priority ?? 0) > (b.rule.priority ?? 0);
   const best = new Map<string, Outcome>();
   for (const o of outcomes) {
-    const group = stackingGroupOf(o.rule);
+    const group = stackingGroupOf(o.rule, stacking.mode === 'stack');
     const current = best.get(group);
     if (!current || better(o, current)) best.set(group, o);
   }
@@ -230,12 +251,25 @@ export function evaluate(
     appliedRuleIds: [],
   };
   let balance = member.pointsBalance;
-  for (const o of best.values()) {
+  // When fuel discounts stack, the largest go first until the cents-per-gallon cap is used up.
+  let fuelCentsLeft = stacking.mode === 'stack' ? stacking.maxCentsPerGallon : Infinity;
+  const ordered = [...best.values()].sort((a, b) => (better(a, b) ? -1 : better(b, a) ? 1 : 0));
+  for (const o of ordered) {
     if (o.pointsCost > balance) continue;
+    let discount = o.discount;
+    if (discount?.kind === 'fuel' && discount.centsPerGallon !== undefined) {
+      const cpg = Math.min(discount.centsPerGallon, fuelCentsLeft);
+      if (cpg <= 0) continue;
+      fuelCentsLeft -= cpg;
+      if (cpg !== discount.centsPerGallon) {
+        const gallons = discount.centsOff / discount.centsPerGallon;
+        discount = { ...discount, centsPerGallon: cpg, centsOff: Math.round(gallons * cpg) };
+      }
+    }
     balance -= o.pointsCost;
     result.pointsSpent += o.pointsCost;
     result.pointsEarned += o.points;
-    if (o.discount) result.discounts.push(o.discount);
+    if (discount) result.discounts.push(discount);
     if (o.punch) result.punches[o.punch.cardId] = o.punch.count;
     result.appliedRuleIds.push(o.rule.id);
   }

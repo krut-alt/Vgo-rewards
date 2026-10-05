@@ -22,7 +22,8 @@ export type Scope =
   | { kind: 'groups'; groupIds: GroupId[] };
 
 export type RuleStatus = 'draft' | 'active' | 'paused' | 'retired';
-export type FundedBy = 'jobber' | 'store' | 'manufacturer';
+/** `split` means jobber and store each pay half. */
+export type FundedBy = 'jobber' | 'store' | 'split' | 'manufacturer';
 export type Period = 'day' | 'week' | 'month' | 'lifetime';
 
 export interface Schedule {
@@ -44,7 +45,10 @@ export type Effect =
   | { type: 'pointsPerDollar'; points: number; categories?: string[]; excludeCategories?: string[] }
   | { type: 'pointsPerGallon'; points: number; maxGallons?: number }
   | { type: 'pointsFlat'; points: number }
-  /** Cents off per gallon. With `costPoints`, the member spends points to unlock it. */
+  /**
+   * Cents off per gallon. With `costPoints` it is a points redemption: it applies only
+   * when the member chose it for this visit (`Transaction.redeemRuleIds`).
+   */
   | { type: 'fuelDiscount'; centsPerGallon: number; maxGallons: number; costPoints?: number }
   | {
       type: 'itemDiscount';
@@ -53,6 +57,8 @@ export type Effect =
       centsOff?: number;
       percentOff?: number;
       maxQty: number;
+      /** Points redemption, chosen by the member like a fuel redemption. */
+      costPoints?: number;
     }
   | { type: 'basketDiscount'; centsOff: number }
   /** Buy `every` matching items, the next one free (cheapest matching item). */
@@ -74,6 +80,8 @@ export interface Rule {
    */
   stackingGroup?: string;
   priority?: number;
+  /** Most discount (cents) this rule may give in a calendar month across all members. */
+  monthlyBudgetCents?: number;
   fundedBy: FundedBy;
   createdBy: { role: Role; userId: string; storeId?: StoreId };
 }
@@ -101,6 +109,8 @@ export interface Transaction {
   localDayOfWeek: number; // store-local 0 = Sunday
   items: LineItem[];
   fuel?: FuelLine;
+  /** Points redemptions the member picked in the app or at the register for this visit. */
+  redeemRuleIds?: string[];
 }
 
 export interface Member {
@@ -113,6 +123,17 @@ export interface Member {
 
 /** How often each rule was already used by this member, per period. */
 export type UsageLookup = (ruleId: string, period: Period) => number;
+
+/** Program-wide controls the jobber sets in the console. */
+export interface EvaluateOptions {
+  /** Discount cents a rule already gave this calendar month, for `monthlyBudgetCents`. */
+  budgetUsed?: (ruleId: string) => number;
+  /**
+   * `best`: one fuel discount per fill-up, the largest wins (default).
+   * `stack`: fuel discounts add up, capped at `maxCentsPerGallon`.
+   */
+  fuelStacking?: { mode: 'best' } | { mode: 'stack'; maxCentsPerGallon: number };
+}
 
 export interface AppliedDiscount {
   ruleId: string;
