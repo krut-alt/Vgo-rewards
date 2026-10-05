@@ -1,0 +1,29 @@
+# Render blueprint: one web service with a small disk for the data file.
+# Secrets (marked sync: false) are typed into Render's dashboard, never committed here.
+services:
+  - type: web
+    name: vgo-rewards
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: node dist/console/src/main.js
+    healthCheckPath: /app/
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: HOST
+        value: 0.0.0.0
+      - key: VGO_DATA
+        value: /var/data/console.json
+      - key: VGO_ADMIN_PASSWORD
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM
+        sync: false
+    disk:
+      name: vgo-data
+      mountPath: /var/data
+      sizeGB: 1

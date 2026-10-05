@@ -55,3 +55,11 @@ Store cities, the state split and POS for stores 02 to 13 are placeholders until
 
 There is no sign-in yet, so the console listens on localhost only. Sign-in and roles
 (jobber admin, jobber marketer, store manager) come before it is hosted.
+
+## Hosting
+
+`render.yaml` sets up the app on Render: one web service plus a 1 GB disk at `/var/data` that holds
+the data file. In Render choose New > Blueprint, pick this repo, and fill in the secret values it asks
+for: `VGO_ADMIN_PASSWORD` (the console password; any user name works) and the three Twilio settings.
+The member app at `/app/` stays open to everyone; the console and its API ask for the password.
+The server refuses to start on a public address without `VGO_ADMIN_PASSWORD`.
