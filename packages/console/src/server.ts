@@ -1,5 +1,6 @@
 // Console API and web server. No sign-in yet, so it listens on localhost only;
 // sign-in and roles come before it is hosted anywhere.
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { extname, join, normalize, resolve } from 'node:path';
@@ -83,6 +84,17 @@ export interface AppOptions {
   /** Folder with the customer app, served at /app/. */
   appDir?: string;
   memberApi?: MemberApi;
+  /** When set, the console and its API ask for this password. The member app stays open. */
+  adminPassword?: string;
+}
+
+/** Basic auth check; any user name is accepted. */
+function passwordMatches(header: string | undefined, password: string): boolean {
+  const m = /^Basic (.+)$/i.exec(header ?? '');
+  if (!m) return false;
+  const decoded = Buffer.from(m[1]!, 'base64').toString('utf8');
+  const given = createHash('sha256').update(decoded.slice(decoded.indexOf(':') + 1)).digest();
+  return timingSafeEqual(given, createHash('sha256').update(password).digest());
 }
 
 export function createApp(repo: Repo, publicDir: string, options: AppOptions | (() => Date) = {}) {
@@ -254,6 +266,11 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
   return createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     try {
+      const memberSide = url.pathname === '/app' || url.pathname.startsWith('/app/') || url.pathname.startsWith('/api/app/');
+      if (opts.adminPassword && !memberSide && !passwordMatches(req.headers.authorization, opts.adminPassword)) {
+        res.writeHead(401, { 'www-authenticate': 'Basic realm="VGO Rewards console", charset="UTF-8"' });
+        return res.end('Sign in to the VGO Rewards console.');
+      }
       if (url.pathname.startsWith('/api/app/')) {
         const [status, data] = await appApi(req, url);
         return send(res, status, data);

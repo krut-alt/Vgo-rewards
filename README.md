@@ -55,3 +55,16 @@ Store cities, the state split and POS for stores 02 to 13 are placeholders until
 
 There is no sign-in yet, so the console listens on localhost only. Sign-in and roles
 (jobber admin, jobber marketer, store manager) come before it is hosted.
+
+## Hosting
+
+`render.yaml` sets up the app on Render's free plan. Free servers have no lasting disk, so the data
+is kept in a free Upstash Redis database (`UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`,
+from the database's REST API section); without those settings it uses the `VGO_DATA` file.
+In Render choose New > Blueprint, pick this repo, and fill in the secret values it asks for:
+`VGO_ADMIN_PASSWORD` (the console password; any user name works), the two Upstash settings and the
+three Twilio settings. Free servers sleep after 15 idle minutes, so the first visit after that
+takes about a minute.
+
+The member app at `/app/` stays open to everyone; the console and its API ask for the password.
+The server refuses to start on a public address without `VGO_ADMIN_PASSWORD`.
