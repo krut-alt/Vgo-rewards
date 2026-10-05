@@ -8,7 +8,7 @@ import { shortDate } from './dates.js';
 import type { AppAuth, ConsoleMember, ConsoleRule, ConsoleStore } from './model.js';
 import { ConsoleError, type Repo } from './repo.js';
 
-/** Sends the sign-in code. Until an SMS provider is connected, codes go to the server log. */
+/** Sends the sign-in code. See sms.ts for Twilio; without it, codes go to the server log. */
 export type SmsSender = (phone: string, text: string) => void | Promise<void>;
 export const logSender: SmsSender = (phone, text) => console.log(`[sms to ***${phone.slice(-4)}] ${text}`);
 
@@ -77,7 +77,15 @@ export class MemberApi {
     };
     this.repo.save();
     const name = this.repo.data.branding.programName;
-    await this.sendSms(phone, `${code} is your ${name} code. It expires in ${CODE_MINUTES} minutes.`);
+    try {
+      await this.sendSms(phone, `${code} is your ${name} code. It expires in ${CODE_MINUTES} minutes.`);
+    } catch (err) {
+      // A text that never went out shouldn't count toward the hourly limit or leave a usable code.
+      if (prev) this.auth.codes[phone] = prev;
+      else delete this.auth.codes[phone];
+      this.repo.save();
+      throw err;
+    }
     return this.exposeCodes ? { sent: true, devCode: code } : { sent: true };
   }
 
