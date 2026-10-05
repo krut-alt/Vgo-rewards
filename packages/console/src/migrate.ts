@@ -1,6 +1,7 @@
 // One-time updates to saved data, applied when the server loads it. Each runs once, in order,
 // and is recorded in `data.migrations`, so changes made in the portal afterwards are kept.
 import type { ConsoleData } from './model.js';
+import { birthdayRule } from './seed.js';
 
 const MIGRATIONS: { id: string; run: (d: ConsoleData) => void }[] = [
   {
@@ -19,6 +20,13 @@ const MIGRATIONS: { id: string; run: (d: ConsoleData) => void }[] = [
     id: '2026-10-no-store-cap',
     run: (d) => {
       d.settings.maxStoreDiscountCents = 0;
+    },
+  },
+  {
+    // Krut, Oct 2026: a birthday reward, editable in the portal.
+    id: '2026-10-birthday-treat',
+    run: (d) => {
+      if (!d.rules.some((r) => r.id === 'birthday-treat')) d.rules.push(birthdayRule(new Date().toISOString()));
     },
   },
 ];

@@ -62,7 +62,25 @@ export function conditionPasses(c: Condition, tx: Transaction, member: Member): 
       return c.tags.some((t) => member.tags.includes(t));
     case 'firstVisit':
       return member.visitCount === 0;
+    case 'birthday':
+      return tx.localDate !== undefined && member.birthday !== undefined && inBirthdayWindow(member.birthday, tx.localDate, c.window);
   }
+}
+
+/** Whether `ymd` falls in the member's birthday window. Feb 29 birthdays count as Feb 28 in other years. */
+export function inBirthdayWindow(birthday: string, ymd: string, window: 'day' | 'week' | 'month'): boolean {
+  const [bm, bd] = birthday.split('-').map(Number) as [number, number];
+  const year = Number(ymd.slice(0, 4));
+  if (window === 'month') return Number(ymd.slice(5, 7)) === bm;
+  const day = Date.UTC(year, Number(ymd.slice(5, 7)) - 1, Number(ymd.slice(8, 10)));
+  const leap = (y: number) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  const birthdayIn = (y: number) => Date.UTC(y, bm - 1, bm === 2 && bd === 29 && !leap(y) ? 28 : bd);
+  const span = window === 'day' ? 0 : 6;
+  // Last year's birthday week can run into January.
+  return [year, year - 1].some((y) => {
+    const start = birthdayIn(y);
+    return day >= start && day <= start + span * 86_400_000;
+  });
 }
 
 function underLimit(rule: Rule, usage: UsageLookup): boolean {

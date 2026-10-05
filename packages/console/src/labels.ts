@@ -154,6 +154,8 @@ export function conditionLabel(c: Condition): string {
       return `Members tagged ${listLabel(c.tags)}`;
     case 'firstVisit':
       return 'First visit';
+    case 'birthday':
+      return c.window === 'day' ? 'On their birthday' : c.window === 'week' ? 'Birthday week' : 'Birthday month';
   }
 }
 
@@ -164,5 +166,11 @@ export function memberLine(rule: ConsoleRule): string {
   const e = rule.effect;
   if (e.type === 'fuelDiscount' && e.costPoints) return `Use ${e.costPoints} points at the pump.`;
   if (e.type === 'itemDiscount' && e.costPoints) return `Use ${e.costPoints} points at the register.`;
+  const bday = rule.conditions.find((c) => c.type === 'birthday');
+  if (bday) {
+    const others = rule.conditions.filter((c) => c !== bday).map(conditionLabel);
+    const when = bday.window === 'day' ? 'on your birthday' : bday.window === 'week' ? 'any visit in your birthday week' : 'any visit in your birthday month';
+    return `Happy birthday! Use it ${when}${others.length ? ` with ${listLabel(others).toLowerCase()}` : ''}.`;
+  }
   return conds.length ? `${listLabel(conds)} in the same visit.` : 'Show your VGO Rewards at checkout.';
 }

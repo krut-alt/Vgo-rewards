@@ -24,7 +24,7 @@ export type Scope =
 export type RuleStatus = 'draft' | 'active' | 'paused' | 'retired';
 /** `split` means jobber and store each pay half. */
 export type FundedBy = 'jobber' | 'store' | 'split' | 'manufacturer';
-export type Period = 'day' | 'week' | 'month' | 'lifetime';
+export type Period = 'day' | 'week' | 'month' | 'year' | 'lifetime';
 
 export interface Schedule {
   startsAt?: string; // ISO date-time, inclusive
@@ -39,7 +39,12 @@ export type Condition =
   | { type: 'minGallons'; gallons: number }
   | { type: 'fuelGrade'; grades: string[] }
   | { type: 'memberTag'; tags: string[] }
-  | { type: 'firstVisit' };
+  | { type: 'firstVisit' }
+  /**
+   * The member's birthday: on the day itself, the 7 days starting on it, or the whole month.
+   * Needs the member's birthday (month and day) and the transaction's store-local date.
+   */
+  | { type: 'birthday'; window: 'day' | 'week' | 'month' };
 
 export type Effect =
   | { type: 'pointsPerDollar'; points: number; categories?: string[]; excludeCategories?: string[] }
@@ -109,6 +114,8 @@ export interface Transaction {
   at: string; // ISO date-time
   localHour: number; // store-local hour 0-23
   localDayOfWeek: number; // store-local 0 = Sunday
+  /** Store-local date, YYYY-MM-DD. Needed for birthday rules. */
+  localDate?: string;
   items: LineItem[];
   fuel?: FuelLine;
   /** Points redemptions the member picked in the app or at the register for this visit. */
@@ -123,6 +130,8 @@ export interface Member {
   punches: Record<string, number>;
   /** Offers the member added to their card in the app. */
   clippedRuleIds?: string[];
+  /** Month and day, MM-DD. */
+  birthday?: string;
 }
 
 /** How often each rule was already used by this member, per period. */

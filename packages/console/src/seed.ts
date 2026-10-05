@@ -28,6 +28,25 @@ function stores(): ConsoleStore[] {
   });
 }
 
+/** The starting birthday reward. Krut edits it in the portal like any offer. */
+export function birthdayRule(at: string): ConsoleRule {
+  return {
+    id: 'birthday-treat',
+    name: 'Birthday treat: free coffee or fountain drink',
+    section: 'offer',
+    status: 'active',
+    scope: { kind: 'all' },
+    conditions: [{ type: 'birthday', window: 'week' }],
+    fundedBy: 'jobber',
+    effect: { type: 'itemDiscount', categories: ['coffee', 'fountain'], percentOff: 100, maxQty: 1 },
+    perMemberLimit: { count: 1, period: 'year' },
+    headline: 'HAPPY BIRTHDAY',
+    createdBy: ADMIN,
+    createdAt: at,
+    updatedAt: at,
+  };
+}
+
 function rules(today: string, pilotStart: string): ConsoleRule[] {
   const at = new Date(localMidnight(pilotStart)).toISOString();
   const base = { conditions: [], fundedBy: 'jobber' as const, createdBy: ADMIN, createdAt: at, updatedAt: at };
@@ -94,6 +113,7 @@ function rules(today: string, pilotStart: string): ConsoleRule[] {
       effect: { type: 'fuelDiscount', centsPerGallon: 25, maxGallons: 20 },
       memberText: 'Your first fill-up as a member, up to 20 gallons.',
     },
+    birthdayRule(at),
     {
       ...base,
       id: 'coffee-card',

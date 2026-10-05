@@ -59,6 +59,13 @@ export function offerKind(r: ConsoleRule): AppOffer['kind'] {
   return r.fundedBy === 'manufacturer' ? 'brand' : e.type === 'fuelDiscount' ? 'fuel' : cats.some((c) => FOOD_DRINK.includes(c)) ? 'food' : 'other';
 }
 
+function birthdayLabel(mmdd: string, window: 'day' | 'week' | 'month'): string {
+  const d = new Date(Date.UTC(2024, Number(mmdd.slice(0, 2)) - 1, Number(mmdd.slice(3))));
+  const month = d.toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' });
+  const day = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  return window === 'month' ? `all of ${month}` : window === 'week' ? `the week of ${day}` : day;
+}
+
 /** The big text on a reward card without artwork, like "25¢ OFF" or "6TH FREE". */
 export function promoHeadline(r: ConsoleRule): string {
   if (r.headline?.trim()) return r.headline.trim();
@@ -217,8 +224,8 @@ export class MemberApi {
 
   /** Whether the member already meets the qualifiers that don't depend on what they buy. */
   private qualifiesNow(r: ConsoleRule, m: ConsoleMember): boolean {
-    const emptyTx: Transaction = { id: 'probe', storeId: '', at: this.clock().toISOString(), localHour: 12, localDayOfWeek: 0, items: [] };
-    return r.conditions.every((c) => (c.type === 'firstVisit' || c.type === 'memberTag' ? conditionPasses(c, emptyTx, m) : true));
+    const emptyTx: Transaction = { id: 'probe', storeId: '', at: this.clock().toISOString(), localHour: 12, localDayOfWeek: 0, localDate: localParts(this.clock()).ymd, items: [] };
+    return r.conditions.every((c) => (c.type === 'firstVisit' || c.type === 'memberTag' || c.type === 'birthday' ? conditionPasses(c, emptyTx, m) : true));
   }
 
   private offerView(r: ConsoleRule, m: ConsoleMember): AppOffer {
@@ -328,6 +335,16 @@ export class MemberApi {
       });
 
     const allOffers = this.offers(m).offers;
+    // Birthday rewards: ready now, coming up, or waiting for the member to add a birthday.
+    const bdayRule = running.find((r) => r.section === 'offer' && r.conditions.some((c) => c.type === 'birthday'));
+    const bdayWindow = bdayRule?.conditions.find((c) => c.type === 'birthday') as { window: 'day' | 'week' | 'month' } | undefined;
+    const birthday = !bdayRule
+      ? null
+      : !m.birthday
+        ? { state: 'add-birthday' as const, name: bdayRule.name }
+        : this.qualifiesNow(bdayRule, m)
+          ? { state: 'ready' as const, name: bdayRule.name, offer: this.offerView(bdayRule, m) }
+          : { state: 'coming' as const, name: bdayRule.name, on: birthdayLabel(m.birthday, bdayWindow!.window) };
     const marked = allOffers.filter((o) => o.featured);
     const featured = (marked.length ? marked : allOffers.filter((o) => o.imageUrl)).slice(0, 6);
 
@@ -356,6 +373,7 @@ export class MemberApi {
       offers: allOffers.filter((o) => o.how !== 'punch' && !freeFuel.some((f) => f.ruleId === o.ruleId)).slice(0, 6),
       // The slider at the top of home: offers marked "feature", else the ones with artwork.
       featured,
+      birthday,
     };
   }
 

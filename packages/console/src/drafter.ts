@@ -352,7 +352,7 @@ export function draftRule(input: string, ctx: DraftContext): Draft {
 
   // Limits and funding.
   const perMemberLimit = findLimit(text);
-  if (perMemberLimit) chips.push(perMemberLimit.period === 'lifetime' ? `${perMemberLimit.count} per member` : `${perMemberLimit.count} per member per ${perMemberLimit.period}`);
+  if (perMemberLimit) chips.push(perMemberLimit.period === 'lifetime' ? `${perMemberLimit.count} per member` : perMemberLimit.period === 'year' ? `${perMemberLimit.count} per member per year` : `${perMemberLimit.count} per member per ${perMemberLimit.period}`);
   const fundedBy = /\b(manufacturer|brand)[- ]?(funded|pays|paid)?\b|\bskupos\b/.test(text)
     ? 'manufacturer'
     : /\bsplit\b|\b50\/50\b/.test(text)

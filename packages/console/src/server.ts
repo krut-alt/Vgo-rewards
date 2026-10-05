@@ -83,7 +83,7 @@ function withLocalTime(tx: Transaction): Transaction {
   if (!tx || typeof tx.at !== 'string' || Number.isNaN(Date.parse(tx.at))) throw new ConsoleError('Transaction needs a valid "at" time.');
   if (!tx.id || !tx.storeId) throw new ConsoleError('Transaction needs an id and a storeId.');
   const p = localParts(tx.at);
-  return { ...tx, items: tx.items ?? [], localHour: tx.localHour ?? p.hour, localDayOfWeek: tx.localDayOfWeek ?? p.dayOfWeek };
+  return { ...tx, items: tx.items ?? [], localHour: tx.localHour ?? p.hour, localDayOfWeek: tx.localDayOfWeek ?? p.dayOfWeek, localDate: tx.localDate ?? p.ymd };
 }
 
 export interface AppOptions {

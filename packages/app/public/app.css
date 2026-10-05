@@ -184,3 +184,9 @@ dialog::backdrop { background: rgba(15, 39, 71, 0.45); }
 .perks { display: flex; flex-wrap: wrap; gap: 8px; }
 .perks span { display: inline-flex; align-items: center; gap: 6px; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 16px; padding: 6px 12px 6px 8px; font-size: 14px; font-weight: 600; }
 .perks svg { color: var(--gold); }
+
+.art.poster.birthday { background: linear-gradient(135deg, #ff5a7a 0%, #c8102e 45%, #6b2bd1 100%); }
+.confetti { position: absolute; inset: 0; pointer-events: none;
+  background-image: radial-gradient(circle, #fff1a8 0 3px, transparent 4px), radial-gradient(circle, #ffffff 0 2px, transparent 3px), radial-gradient(circle, #7fe3ff 0 3px, transparent 4px);
+  background-size: 70px 60px, 45px 50px, 90px 80px; background-position: 0 0, 20px 15px, 40px 30px; opacity: 0.8; }
+.promo.bday { border: 2px solid var(--accent); }

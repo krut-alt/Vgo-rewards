@@ -375,6 +375,7 @@ function blankForm() {
     minSpend: '',
     grades: [],
     firstVisit: false,
+    birthday: '',
     otherConditions: [],
     fundedBy: isAdmin() ? 'jobber' : 'store',
     scopeKind: 'stores',
@@ -437,6 +438,7 @@ function formFromRule(rule) {
     else if (c.type === 'minInsideSpend') f.minSpend = (c.cents / 100).toFixed(2);
     else if (c.type === 'fuelGrade') f.grades = c.grades;
     else if (c.type === 'firstVisit') f.firstVisit = true;
+    else if (c.type === 'birthday') f.birthday = c.window;
     else if (c.type === 'hasItem' && (e.type === 'itemDiscount' || e.type === 'basketDiscount')) {
       // "Buy X" qualifiers on item discounts are rebuilt from the discounted items.
       if (e.type === 'basketDiscount') f.otherConditions.push(c);
@@ -510,6 +512,7 @@ function ruleFromForm(f) {
   if (num(f.minSpend)) conditions.push({ type: 'minInsideSpend', cents: dollarsToCents(f.minSpend), excludeCategories: ['tobacco', 'lottery', 'gift-cards'] });
   if (f.grades.length) conditions.push({ type: 'fuelGrade', grades: f.grades });
   if (f.firstVisit) conditions.push({ type: 'firstVisit' });
+  if (f.birthday) conditions.push({ type: 'birthday', window: f.birthday });
 
   const schedule = {};
   if (f.starts) schedule.startsAt = localMidnightIso(f.starts);
@@ -766,6 +769,22 @@ function renderOfferForm(id) {
             field('Requires inside spend of at least ($)', text('minSpend', { inputmode: 'decimal', placeholder: 'Optional' })),
           ),
           h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: f.firstVisit, onchange: (e) => set({ firstVisit: e.target.checked }) }), 'Only on a member’s first visit'),
+          h(
+            'label',
+            { class: 'row' },
+            'Birthday reward:',
+            h(
+              'select',
+              { onchange: (e) => set({ birthday: e.target.value }), 'aria-label': 'Birthday reward' },
+              [
+                ['', 'No, any day'],
+                ['day', 'Only on their birthday'],
+                ['week', 'During their birthday week'],
+                ['month', 'During their birthday month'],
+              ].map(([v, l]) => h('option', { value: v, selected: f.birthday === v }, l)),
+            ),
+          ),
+          f.birthday && h('p', { class: 'note' }, 'Members add their birthday on the Account screen in the app. Set "Uses per member" to 1 per year so it is once a birthday.'),
           f.section === 'offer' &&
             h(
               'label',
@@ -877,6 +896,7 @@ function renderOfferForm(id) {
                     ['day', 'per day'],
                     ['week', 'per week'],
                     ['month', 'per month'],
+                    ['year', 'per year'],
                     ['lifetime', 'ever'],
                   ].map(([v, l]) => h('option', { value: v, selected: f.limitPeriod === v }, l)),
                 ),
