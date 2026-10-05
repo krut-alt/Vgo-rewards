@@ -21,6 +21,10 @@ export function twilioConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Twili
 
 // Twilio error codes a member can do something about.
 const TWILIO_MESSAGES: Record<number, string> = {
+  20003: 'Texting is not set up right: Twilio rejected the account SID or auth token.',
+  21212: 'Texting is not set up right: the sending number is not valid. Use +1 and 10 digits.',
+  21606: 'Texting is not set up right: the sending number is not a Twilio number on this account.',
+  21659: 'Texting is not set up right: the sending number is not a Twilio number on this account.',
   21211: 'That phone number is not valid.',
   21266: 'That is our texting number. Enter your own mobile number.',
   21608: 'This number is not on the test list yet. Ask VGO to add it.', // trial accounts text verified numbers only
@@ -47,7 +51,8 @@ export function twilioSender(config: TwilioConfig, fetchImpl: typeof fetch = fet
     const detail = (await res.json().catch(() => ({}))) as { code?: number; message?: string };
     console.error(`[sms] Twilio ${res.status} ${detail.code ?? ''}: ${detail.message ?? ''}`);
     const known = detail.code !== undefined ? TWILIO_MESSAGES[detail.code] : undefined;
-    throw new ConsoleError(known ?? 'We couldn’t send the text right now. Try again in a minute.', known ? 400 : 502);
+    const ref = ` (Twilio error ${detail.code ?? res.status})`;
+    throw new ConsoleError(known ? known + ref : `We couldn’t send the text right now.${ref}`, known ? 400 : 502);
   };
 }
 

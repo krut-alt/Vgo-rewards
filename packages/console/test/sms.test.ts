@@ -31,9 +31,16 @@ describe('Twilio texts', () => {
     await expect(twilioSender(config, f.impl)('8035550199', 'x')).rejects.toThrow(/not on the test list/);
   });
 
-  it('explains texting the program's own number', async () => {
+  it('explains texting the program’s own number', async () => {
     const f = fakeFetch(400, { code: 21266, message: 'To and From cannot be the same' });
     await expect(twilioSender(config, f.impl)('8035550000', 'x')).rejects.toThrow(/our texting number/);
+  });
+
+  it('names setup problems and shows the Twilio error number', async () => {
+    const f = fakeFetch(401, { code: 20003, message: 'Authenticate' });
+    await expect(twilioSender(config, f.impl)('8035550199', 'x')).rejects.toThrow('Twilio rejected the account SID or auth token. (Twilio error 20003)');
+    const g = fakeFetch(400, { code: 21659, message: 'not a Twilio phone number' });
+    await expect(twilioSender(config, g.impl)('8035550199', 'x')).rejects.toThrow(/not a Twilio number/);
   });
 
   it('gives a generic message for other failures', async () => {
