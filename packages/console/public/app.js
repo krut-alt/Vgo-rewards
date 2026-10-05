@@ -59,6 +59,61 @@ dialog.addEventListener('click', (e) => {
   if (e.target === dialog) closeDialog();
 });
 
+const DISCOUNT_TYPES = ['fuelDiscount', 'itemDiscount', 'basketDiscount', 'punchCard'];
+const isDiscount = (rule) => DISCOUNT_TYPES.includes(rule.effect?.type);
+
+function discountSummary(rule) {
+  const e = rule.effect;
+  if (e.type === 'fuelDiscount') return `${e.centsPerGallon}¢ a gallon off, up to ${e.maxGallons} gallons${e.costPoints ? `, for ${e.costPoints} points` : ''}`;
+  if (e.type === 'basketDiscount') return `${money(e.centsOff)} off the purchase`;
+  if (e.type === 'punchCard') return `Buy ${e.every}, get the next one free`;
+  if (e.type === 'itemDiscount') return e.percentOff ? `${e.percentOff}% off` : e.centsOff ? `${money(e.centsOff)} off` : 'Free item';
+  return '';
+}
+function targetSummary(rule) {
+  const sc = rule.scope;
+  if (sc.kind === 'all') return `All ${boot.stores.length} locations`;
+  if (sc.kind === 'groups') return sc.groupIds.map((g) => boot.groups.find((x) => x.id === g)?.name ?? g).join(', ');
+  return sc.storeIds.map(storeName).join(', ');
+}
+const PAYER = { jobber: 'Corporate', store: 'The store', brand: 'The brand', split: 'Split between corporate and the store' };
+
+/** Asks once more before a discount goes live. Resolves true when confirmed. */
+function confirmDiscounts(rules) {
+  const list = rules.filter(isDiscount);
+  if (!list.length) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const done = (ok) => {
+      dialog.removeEventListener('close', onClose);
+      closeDialog();
+      resolve(ok);
+    };
+    const onClose = () => done(false);
+    dialog.addEventListener('close', onClose);
+    openDialog(
+      h('h2', {}, list.length > 1 ? `Confirm ${list.length} discounts` : 'Confirm this discount'),
+      h('p', {}, 'Customers will get this at checkout once it’s on. Please check it once more.'),
+      ...list.map((r) =>
+        h(
+          'div',
+          { class: 'card confirm-card' },
+          h('b', {}, r.name || 'Untitled'),
+          h('div', {}, discountSummary(r)),
+          h('div', { class: 'meta' }, `Where: ${targetSummary(r)}`),
+          h('div', { class: 'meta' }, `Who pays: ${PAYER[r.fundedBy] ?? r.fundedBy}`),
+        ),
+      ),
+      h(
+        'div',
+        { class: 'row' },
+        h('div', { class: 'grow' }),
+        h('button', { class: 'btn ghost', onclick: () => done(false) }, 'Go back'),
+        h('button', { class: 'btn accent', onclick: () => done(true) }, 'Yes, save it'),
+      ),
+    );
+  });
+}
+
 function errorBox(err) {
   const problems = err.problems || [err.message];
   return h('div', { class: 'error', role: 'alert' }, problems.length > 1 ? h('ul', {}, problems.map((p) => h('li', {}, p))) : problems[0]);
@@ -553,6 +608,7 @@ function renderOfferForm(id) {
   const save = async (status) => {
     errors.replaceChildren();
     const rule = ruleFromForm({ ...f, status: status ?? f.status });
+    if (rule.status !== 'draft' && !(await confirmDiscounts([rule]))) return;
     try {
       const saved = existing ? await api('PUT', `/rules/${existing.id}`, rule) : await api('POST', '/rules', rule);
       await reload();
@@ -565,6 +621,7 @@ function renderOfferForm(id) {
     }
   };
   const setStatus = async (status) => {
+    if (status === 'active' && !(await confirmDiscounts([existing]))) return;
     try {
       await api('POST', `/rules/${existing.id}/status`, { status });
       await reload();
@@ -907,6 +964,10 @@ function ruleRow(rule) {
         checked: on,
         'aria-label': `${rule.name} on or off`,
         onchange: async (e) => {
+          if (e.target.checked && !(await confirmDiscounts([rule]))) {
+            e.target.checked = false;
+            return;
+          }
           try {
             await api('POST', `/rules/${rule.id}/status`, { status: e.target.checked ? 'active' : 'paused' });
             await reload();
@@ -1264,6 +1325,7 @@ function applyPreviewBranding() {
 async function saveRulesPage() {
   const errors = document.getElementById('rules-errors');
   errors.replaceChildren();
+  if (!(await confirmDiscounts(Object.values(ruleEdits).filter((r) => r.status !== 'draft')))) return;
   try {
     for (const [id, rule] of Object.entries(ruleEdits)) {
       const { display, createdAt, updatedAt, createdBy, ...input } = rule;
@@ -1349,17 +1411,32 @@ function renderRules() {
 // ---------- Stores and groups ----------
 
 function storeDialog(store) {
-  const s = structuredClone(store);
+  const isNew = !store;
+  const s = store
+    ? structuredClone(store)
+    : { id: '', name: '', address: '', city: '', state: 'SC', zip: '', contactName: '', email: '', phone: '', groupIds: [], pos: 'verifone-commander', posSiteId: '', loyaltyLive: false, mappedCategories: [] };
   const errors = h('div', {});
-  const field = (label, input) => h('label', { class: 'field' }, h('span', {}, label), input);
+  const field = (label, input, hint) => h('label', { class: 'field' }, h('span', {}, label), input, hint ? h('span', { class: 'hint' }, hint) : null);
+  const text = (key, attrs = {}) => h('input', { value: s[key] ?? '', oninput: (e) => (s[key] = e.target.value), ...attrs });
   openDialog(
-    h('h2', {}, s.name),
+    h('h2', {}, isNew ? 'Add a location' : s.name),
+    h('h3', { class: 'dialog-section' }, 'Site'),
     h(
       'div',
       { class: 'grid2' },
-      field('Name', h('input', { value: s.name, oninput: (e) => (s.name = e.target.value) })),
-      field('City', h('input', { value: s.city, oninput: (e) => (s.city = e.target.value) })),
-      field('State', h('select', { onchange: (e) => (s.state = e.target.value) }, ['SC', 'NC', 'GA'].map((st) => h('option', { selected: s.state === st }, st)))),
+      field('Site name', text('name', { placeholder: 'e.g. VGO 14' })),
+      field('Contact person', text('contactName')),
+      field('Street address', text('address')),
+      field('City', text('city')),
+      field('State', text('state', { maxlength: 2, placeholder: 'SC', style: 'text-transform:uppercase' })),
+      field('ZIP', text('zip', { inputmode: 'numeric', maxlength: 10 })),
+      field('Email (optional)', text('email', { type: 'email' })),
+      field('Phone (optional)', text('phone', { type: 'tel', inputmode: 'tel' })),
+    ),
+    h('h3', { class: 'dialog-section' }, 'POS connection'),
+    h(
+      'div',
+      { class: 'grid2' },
       field(
         'POS',
         h(
@@ -1368,6 +1445,7 @@ function storeDialog(store) {
           ['verifone-commander', 'gilbarco-passport', 'ncr-radiant', 'other'].map((p) => h('option', { value: p, selected: s.pos === p }, posLabel(p))),
         ),
       ),
+      field('POS link site ID', text('posSiteId', { placeholder: 'Filled in when the link is set up' }), 'The ID the POS loyalty link uses for this store.'),
     ),
     h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: s.loyaltyLive, onchange: (e) => (s.loyaltyLive = e.target.checked) }), 'Loyalty live at this store (POS connected and tested)'),
     field(
@@ -1407,17 +1485,20 @@ function storeDialog(store) {
           class: 'btn accent',
           onclick: async () => {
             try {
-              await api('PUT', `/stores/${s.id}`, s);
+              const body = { ...s };
+              for (const k of ['address', 'zip', 'contactName', 'email', 'phone', 'posSiteId']) if (!String(body[k] ?? '').trim()) body[k] = null;
+              if (isNew) await api('POST', '/stores', body);
+              else await api('PUT', `/stores/${s.id}`, body);
               await reload();
               closeDialog();
-              toast('Store saved');
+              toast(isNew ? 'Location added' : 'Location saved');
               render();
             } catch (err) {
               errors.replaceChildren(errorBox(err));
             }
           },
         },
-        'Save',
+        isNew ? 'Add location' : 'Save',
       ),
     ),
   );
@@ -1474,14 +1555,18 @@ function groupDialog(group) {
 function renderStores() {
   const live = boot.stores.filter((s) => s.loyaltyLive).length;
   main.replaceChildren(
-    pageHead('Stores and groups', `${live} of ${boot.stores.length} stores have loyalty live. Groups let you send an offer to several stores at once.`),
+    pageHead(
+      'Locations',
+      `${live} of ${boot.stores.length} locations have loyalty live. Groups let you send an offer to several stores at once.`,
+      h('button', { class: 'btn accent', onclick: () => storeDialog(null) }, plusIcon(), 'Add location'),
+    ),
     h(
       'div',
       { class: 'card table-wrap' },
       h(
         'table',
         { style: 'min-width: 760px' },
-        h('thead', {}, h('tr', {}, ['Store', 'Location', 'POS', 'Loyalty', 'Groups', 'Mapped categories'].map((t) => h('th', {}, t)))),
+        h('thead', {}, h('tr', {}, ['Site', 'Address', 'Contact', 'POS', 'Loyalty', 'Groups'].map((t) => h('th', {}, t)))),
         h(
           'tbody',
           {},
@@ -1490,17 +1575,17 @@ function renderStores() {
               'tr',
               { class: 'click', tabindex: 0, onclick: () => storeDialog(s), onkeydown: (e) => e.key === 'Enter' && storeDialog(s) },
               h('td', { class: 'strong' }, s.name),
-              h('td', {}, s.city ? `${s.city}, ${s.state}` : s.state),
+              h('td', {}, [s.address, s.city ? `${s.city}, ${s.state}` : s.state].filter(Boolean).join(', ')),
+              h('td', {}, s.contactName || '—'),
               h('td', {}, posLabel(s.pos)),
               h('td', {}, h('span', { class: `badge ${s.loyaltyLive ? 'Live' : 'Draft'}` }, s.loyaltyLive ? 'Live' : 'Not enabled')),
               h('td', {}, s.groupIds.map((g) => boot.groups.find((x) => x.id === g)?.name ?? g).join(', ')),
-              h('td', {}, s.mappedCategories.length || '—'),
             ),
           ),
         ),
       ),
     ),
-    h('p', { class: 'note' }, 'Store cities, the state split and POS for stores 02 to 13 are placeholders until confirmed. Click a store to update it.'),
+    h('p', { class: 'note' }, 'Cities, the state split and POS for stores 02 to 13 are placeholders until confirmed. Click a location to update it.'),
     h(
       'div',
       { class: 'page-head' },
@@ -1857,7 +1942,7 @@ async function renderResults() {
         h('h2', {}, 'Rollout readiness'),
         h('p', { class: 'note' }, `${r.rollout.live} of ${r.rollout.total} stores ${r.rollout.live === 1 ? 'has' : 'have'} loyalty enabled. The rest need a technician visit to go live.`),
       ),
-      h('a', { class: 'btn', href: '#/stores' }, 'Manage stores'),
+      h('a', { class: 'btn', href: '#/stores' }, 'Manage locations'),
     ),
   );
 }

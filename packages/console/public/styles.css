@@ -173,3 +173,6 @@ main:focus { outline: none; }
 .field .row { flex-wrap: nowrap; }
 .field .row select { min-width: 0; }
 label.pill { display: inline-flex; align-items: center; gap: 6px; }
+.field > span.hint { font-weight: 400; font-size: 13px; color: var(--muted, #55606e); }
+.dialog-section { margin: 6px 0 -4px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted, #55606e); }
+.confirm-card { gap: 4px; padding: 14px 16px; }

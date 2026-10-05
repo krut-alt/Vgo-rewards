@@ -16,11 +16,22 @@ export interface ConsoleRule extends Rule {
 
 export interface ConsoleStore {
   id: StoreId;
+  /** Site name, e.g. "VGO 01". */
   name: string;
+  /** Street address. */
+  address?: string;
   city: string;
-  state: 'SC' | 'NC' | 'GA';
+  /** Two-letter state. */
+  state: string;
+  zip?: string;
+  contactName?: string;
+  email?: string;
+  /** 10 digits. */
+  phone?: string;
   groupIds: string[];
   pos: 'verifone-commander' | 'gilbarco-passport' | 'ncr-radiant' | 'other';
+  /** The site ID the POS loyalty link uses for this store, filled in when the link is set up. */
+  posSiteId?: string;
   loyaltyLive: boolean;
   /** POS categories mapped for this store, e.g. "sandwiches". Offers on unmapped categories get a warning. */
   mappedCategories: string[];

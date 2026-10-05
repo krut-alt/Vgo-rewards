@@ -163,7 +163,11 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
     if (method === 'GET' && path === '/stores') return [200, { stores: repo.data.stores, groups: repo.data.groups }];
     if (method === 'PUT' && (match = m(/^\/stores\/([\w-]+)$/))) {
       const store = await body<ConsoleStore>(req);
-      return [200, repo.upsertStore({ ...store, id: match[1]! }, actor)];
+      return [200, repo.upsertStore({ ...withoutNulls(store), id: match[1]! } as ConsoleStore, actor)];
+    }
+    if (method === 'POST' && path === '/stores') {
+      const store = await body<ConsoleStore>(req);
+      return [201, repo.upsertStore({ ...withoutNulls(store), id: '' } as ConsoleStore, actor)];
     }
     if (method === 'POST' && path === '/groups') {
       const { id, name, storeIds } = await body<{ id?: string; name: string; storeIds?: string[] }>(req);

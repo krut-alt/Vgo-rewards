@@ -177,13 +177,27 @@ export class Repo {
 
   upsertStore(store: ConsoleStore, actor: Actor): ConsoleStore {
     if (actor.role !== 'jobber-admin') throw new ConsoleError('Only a jobber admin can change stores.', 403);
-    if (!store.id || !store.name?.trim()) throw new ConsoleError('A store needs an id and a name.');
+    if (!store.name?.trim()) throw new ConsoleError('A location needs a site name.');
+    store = { ...store, groupIds: store.groupIds ?? [], mappedCategories: store.mappedCategories ?? [], name: store.name.trim() };
+    if (!store.id) {
+      const base = slug(store.name) || 'store';
+      let id = base;
+      for (let n = 2; this.data.stores.some((s) => s.id === id); n++) id = `${base}-${n}`;
+      store.id = id;
+    }
+    if (!/^[A-Za-z]{2}$/.test(store.state ?? '')) throw new ConsoleError('Use the two-letter state, like SC.');
+    store.state = store.state.toUpperCase();
+    if (store.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(store.email)) throw new ConsoleError('That email address doesn’t look right.');
+    if (store.phone) {
+      store.phone = store.phone.replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
+      if (store.phone.length !== 10) throw new ConsoleError('Enter a 10-digit phone number.');
+    }
     const unknown = store.groupIds.filter((g) => !this.data.groups.some((x) => x.id === g));
     if (unknown.length) throw new ConsoleError(`Unknown store group ${unknown[0]}.`);
     const i = this.data.stores.findIndex((s) => s.id === store.id);
     if (i >= 0) this.data.stores[i] = store;
     else this.data.stores.push(store);
-    this.log(actor, `${i >= 0 ? 'Updated' : 'Added'} store ${store.name}${store.loyaltyLive ? ' (loyalty live)' : ''}`);
+    this.log(actor, `${i >= 0 ? 'Updated' : 'Added'} location ${store.name}${store.loyaltyLive ? ' (loyalty live)' : ''}`);
     this.save();
     return store;
   }
