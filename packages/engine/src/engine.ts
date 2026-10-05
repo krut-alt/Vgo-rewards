@@ -94,6 +94,7 @@ export function eligibleRules(
       inScope(r.scope, store) &&
       inSchedule(r, tx) &&
       chosenIfRedemption(r, tx) &&
+      (!r.requiresClip || (member.clippedRuleIds?.includes(r.id) ?? false)) &&
       r.conditions.every((c) => conditionPasses(c, tx, member)) &&
       underLimit(r, usage),
   );

@@ -223,6 +223,7 @@ export class Repo {
       visitCount: 0,
       punches: {},
       joinedAt: this.clock().toISOString(),
+      ...(input.smsOptIn !== undefined ? { smsOptIn: Boolean(input.smsOptIn) } : {}),
     };
     this.data.members.push(m);
     this.log(actor, `Added member ${m.name || 'without a name'}`);
@@ -295,13 +296,18 @@ export class Repo {
 
   // ---- transactions (the POS link calls these) ----
 
-  private store(id: string): ConsoleStore {
+  /** Records who did what, for change history. Public so the member API can log app actions. */
+  note(actor: Actor, what: string): void {
+    this.log(actor, what);
+  }
+
+  store(id: string): ConsoleStore {
     const s = this.data.stores.find((x) => x.id === id);
     if (!s) throw new ConsoleError(`Unknown store ${id}.`, 404);
     return s;
   }
 
-  private memberUsage(memberId: string, ymd: string) {
+  memberUsage(memberId: string, ymd: string) {
     const entries = this.data.ledger.filter((e) => e.memberId === memberId);
     return (ruleId: string, period: Period) => {
       const start = periodStart(ymd, period);
@@ -322,7 +328,10 @@ export class Repo {
     const store = this.store(tx.storeId);
     if (!memberId) return { pointsEarned: 0, pointsSpent: 0, discounts: [], punches: {}, appliedRuleIds: [] };
     const ymd = localParts(tx.at).ymd;
-    return evaluate(this.data.rules, store, tx, this.member(memberId), this.memberUsage(memberId, ymd), {
+    const member = this.member(memberId);
+    // Redemptions picked in the app ride along with whatever the POS sends.
+    const redeemRuleIds = [...new Set([...(tx.redeemRuleIds ?? []), ...(member.nextVisitRedeem ?? [])])];
+    return evaluate(this.data.rules, store, { ...tx, redeemRuleIds }, member, this.memberUsage(memberId, ymd), {
       budgetUsed: this.budgetUsed(ymd),
       fuelStacking: this.data.settings.fuelStacking,
     });
@@ -341,6 +350,7 @@ export class Repo {
       m.visitCount += 1;
       m.lastVisitAt = tx.at;
       m.homeStoreId ??= store.id;
+      if (m.nextVisitRedeem) m.nextVisitRedeem = m.nextVisitRedeem.filter((id) => !result.appliedRuleIds.includes(id));
     }
     const entry: LedgerEntry = {
       tx,

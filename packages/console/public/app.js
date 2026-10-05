@@ -265,6 +265,7 @@ function blankForm() {
     stackingGroup: undefined,
     priority: undefined,
     welcome: false,
+    requiresClip: false,
   };
 }
 
@@ -281,6 +282,7 @@ function formFromRule(rule) {
     stackingGroup: rule.stackingGroup,
     priority: rule.priority,
     welcome: rule.welcome ?? false,
+    requiresClip: rule.requiresClip ?? false,
     starts: rule.schedule?.startsAt ? localYmd(rule.schedule.startsAt) : '',
     ends: rule.schedule?.endsAt ? addDaysYmd(localYmd(rule.schedule.endsAt), -1) : '',
     days: rule.schedule?.daysOfWeek ?? [],
@@ -398,6 +400,7 @@ function ruleFromForm(f) {
     stackingGroup: f.stackingGroup ?? null,
     priority: f.priority ?? null,
     welcome: f.welcome || null,
+    requiresClip: f.requiresClip || null,
   };
   if (f.id) rule.id = f.id;
   return rule;
@@ -621,6 +624,13 @@ function renderOfferForm(id) {
             field('Requires inside spend of at least ($)', text('minSpend', { inputmode: 'decimal', placeholder: 'Optional' })),
           ),
           h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: f.firstVisit, onchange: (e) => set({ firstVisit: e.target.checked }) }), 'Only on a member’s first visit'),
+          f.section === 'offer' &&
+            h(
+              'label',
+              { class: 'row' },
+              h('input', { type: 'checkbox', checked: f.requiresClip, onchange: (e) => set({ requiresClip: e.target.checked }) }),
+              'Members add it to their card in the app first',
+            ),
           f.otherConditions.length > 0 && h('p', { class: 'note' }, `Also keeps ${f.otherConditions.length} other qualifier${f.otherConditions.length > 1 ? 's' : ''} set earlier.`),
           field('Line members see under the name (optional)', h('textarea', { maxlength: 140, oninput: (e) => set({ memberText: e.target.value }) }, f.memberText)),
           field(

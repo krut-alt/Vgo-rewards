@@ -18,6 +18,7 @@ import {
   typeLabel,
 } from './labels.js';
 import type { ConsoleRule, ConsoleStore } from './model.js';
+import { MemberApi } from './member-api.js';
 import { PRESETS } from './presets.js';
 import { ConsoleError, Repo, withoutNulls, type RuleInput } from './repo.js';
 import { computeResults } from './results.js';
@@ -29,6 +30,7 @@ const TYPES: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
+  '.webmanifest': 'application/manifest+json',
 };
 
 export function ruleView(repo: Repo, rule: ConsoleRule, now = new Date()) {
@@ -76,7 +78,17 @@ function withLocalTime(tx: Transaction): Transaction {
   return { ...tx, items: tx.items ?? [], localHour: tx.localHour ?? p.hour, localDayOfWeek: tx.localDayOfWeek ?? p.dayOfWeek };
 }
 
-export function createApp(repo: Repo, publicDir: string, clock: () => Date = () => new Date()) {
+export interface AppOptions {
+  clock?: () => Date;
+  /** Folder with the customer app, served at /app/. */
+  appDir?: string;
+  memberApi?: MemberApi;
+}
+
+export function createApp(repo: Repo, publicDir: string, options: AppOptions | (() => Date) = {}) {
+  const opts = typeof options === 'function' ? { clock: options } : options;
+  const clock = opts.clock ?? (() => new Date());
+  const members = opts.memberApi ?? new MemberApi(repo, undefined, clock);
   // Everyone is the jobber admin until sign-in exists.
   const actor: Actor = ADMIN;
 
@@ -190,20 +202,78 @@ export function createApp(repo: Repo, publicDir: string, clock: () => Date = () 
     throw new ConsoleError('Not found.', 404);
   }
 
+  /** The customer app's API. Everything after sign-in acts only on the signed-in member. */
+  async function appApi(req: IncomingMessage, url: URL): Promise<[number, unknown]> {
+    const path = url.pathname.replace(/^\/api\/app/, '');
+    const method = req.method ?? 'GET';
+    if (method === 'GET' && path === '/config') return [200, members.config()];
+    if (method === 'POST' && path === '/code') {
+      const { phone } = await body<{ phone?: string }>(req);
+      return [200, await members.requestCode(phone)];
+    }
+    if (method === 'POST' && path === '/verify') {
+      const { phone, code, firstName, smsOptIn, homeStoreId } = await body<Record<string, string | boolean | undefined>>(req);
+      const result = members.verify(phone, code, { firstName: firstName as string, smsOptIn: Boolean(smsOptIn), homeStoreId: homeStoreId as string });
+      return [200, result];
+    }
+
+    const member = members.memberFor(req.headers.authorization);
+    let match: RegExpExecArray | null;
+    if (method === 'GET' && path === '/me') return [200, members.home(member)];
+    if (method === 'PUT' && path === '/me') {
+      members.updateAccount(member, await body(req));
+      return [200, members.home(member)];
+    }
+    if (method === 'GET' && path === '/offers') return [200, members.offers(member, url.searchParams.get('storeId') ?? undefined)];
+    if ((match = /^\/offers\/([\w-]+)\/clip$/.exec(path)) && (method === 'POST' || method === 'DELETE'))
+      return [200, { clippedRuleIds: members.setClip(member, match[1]!, method === 'POST') }];
+    if (method === 'PUT' && path === '/redeem') {
+      const { ruleIds } = await body<{ ruleIds?: unknown }>(req);
+      return [200, members.setRedeem(member, ruleIds)];
+    }
+    if (method === 'GET' && path === '/visits') return [200, members.visits(member)];
+    if (method === 'POST' && path === '/signout') {
+      members.signOut(req.headers.authorization);
+      return [200, { ok: true }];
+    }
+    throw new ConsoleError('Not found.', 404);
+  }
+
+  async function serveFile(res: ServerResponse, dir: string, rel: string): Promise<boolean> {
+    const file = normalize(join(dir, rel === '' || rel === '/' ? 'index.html' : rel));
+    if (!file.startsWith(dir)) return false;
+    const content = await readFile(file).catch(() => null);
+    if (!content) return false;
+    res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' });
+    res.end(content);
+    return true;
+  }
+
   const root = resolve(publicDir);
+  const appRoot = opts.appDir ? resolve(opts.appDir) : undefined;
   return createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     try {
+      if (url.pathname.startsWith('/api/app/')) {
+        const [status, data] = await appApi(req, url);
+        return send(res, status, data);
+      }
       if (url.pathname.startsWith('/api/')) {
         const [status, data] = await api(req, url);
         return send(res, status, data);
       }
-      const file = normalize(join(root, url.pathname === '/' ? 'index.html' : url.pathname));
-      if (!file.startsWith(root)) return send(res, 404, { error: 'Not found.' });
-      const content = await readFile(file).catch(() => null);
-      if (!content) return send(res, 404, { error: 'Not found.' });
-      res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' });
-      res.end(content);
+      if (url.pathname === '/app') {
+        res.writeHead(302, { location: '/app/' });
+        return res.end();
+      }
+      if (appRoot && url.pathname.startsWith('/app/')) {
+        if (await serveFile(res, appRoot, url.pathname.slice('/app'.length))) return;
+        // Shared files such as the logo come from the console folder.
+        if (await serveFile(res, root, url.pathname.slice('/app'.length))) return;
+        return send(res, 404, { error: 'Not found.' });
+      }
+      if (await serveFile(res, root, url.pathname)) return;
+      send(res, 404, { error: 'Not found.' });
     } catch (err) {
       if (err instanceof ConsoleError) return send(res, err.status, { error: err.message, problems: err.problems });
       console.error(err);

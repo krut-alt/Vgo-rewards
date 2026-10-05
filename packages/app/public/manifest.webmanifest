@@ -1,0 +1,10 @@
+{
+  "name": "VGO Rewards",
+  "short_name": "VGO Rewards",
+  "start_url": "/app/",
+  "scope": "/app/",
+  "display": "standalone",
+  "background_color": "#0F2747",
+  "theme_color": "#0F2747",
+  "icons": [{ "src": "/app/vgo-logo.png", "sizes": "400x400", "type": "image/png" }]
+}
