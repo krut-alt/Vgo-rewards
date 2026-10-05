@@ -1,10 +1,10 @@
-// Console API and web server. No sign-in yet, so it listens on localhost only;
-// sign-in and roles come before it is hosted anywhere.
+// Console API and web server. With an admin password set, the portal needs a sign-in and store
+// users only see their own locations; without one (local development) everyone is the admin.
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { extname, join, normalize, resolve } from 'node:path';
-import type { Actor, RuleStatus, Transaction } from '../../engine/src/index.js';
+import { inScope, type Actor, type RuleStatus, type Transaction } from '../../engine/src/index.js';
 import { CATEGORIES, FUEL_GRADES } from './catalog.js';
 import { ruleChecks } from './checks.js';
 import { localParts } from './dates.js';
@@ -18,8 +18,9 @@ import {
   targetLabel,
   typeLabel,
 } from './labels.js';
-import type { ConsoleRule, ConsoleStore } from './model.js';
+import type { ConsoleData, ConsoleRule, ConsoleStore, PortalUser } from './model.js';
 import { MemberApi } from './member-api.js';
+import { PortalAuthService, type SignedIn } from './portal-auth.js';
 import { PRESETS } from './presets.js';
 import { ConsoleError, Repo, withoutNulls, type RuleInput } from './repo.js';
 import { computeResults } from './results.js';
@@ -84,32 +85,67 @@ export interface AppOptions {
   /** Folder with the customer app, served at /app/. */
   appDir?: string;
   memberApi?: MemberApi;
-  /** When set, the console and its API ask for this password. The member app stays open. */
+  /** When set, the portal needs a sign-in; "admin" plus this password is the master admin. The member app stays open. */
   adminPassword?: string;
+  /** Key the POS link sends as `Authorization: Bearer <key>` to reach /api/pos. */
+  posKey?: string;
 }
 
-/** Basic auth check; any user name is accepted. */
-function passwordMatches(header: string | undefined, password: string): boolean {
-  const m = /^Basic (.+)$/i.exec(header ?? '');
-  if (!m) return false;
-  const decoded = Buffer.from(m[1]!, 'base64').toString('utf8');
-  const given = createHash('sha256').update(decoded.slice(decoded.indexOf(':') + 1)).digest();
-  return timingSafeEqual(given, createHash('sha256').update(password).digest());
+const COOKIE = 'vgo_portal';
+
+function cookie(req: IncomingMessage, name: string): string | undefined {
+  for (const part of (req.headers.cookie ?? '').split(';')) {
+    const [k, ...v] = part.trim().split('=');
+    if (k === name) return decodeURIComponent(v.join('='));
+  }
+  return undefined;
+}
+
+function sameSecret(a: string, b: string): boolean {
+  return timingSafeEqual(createHash('sha256').update(a).digest(), createHash('sha256').update(b).digest());
+}
+
+/** Store ids this person may see, or undefined for admins (everything). */
+function visibleStores(who: SignedIn): string[] | undefined {
+  return who.user.role === 'admin' ? undefined : who.user.storeIds;
+}
+
+/** Members a store user may see: their locations' sign-ups plus anyone who visited them. */
+function visibleMemberIds(data: ConsoleData, storeIds: string[]): Set<string> {
+  const ids = new Set(data.members.filter((m) => m.homeStoreId && storeIds.includes(m.homeStoreId)).map((m) => m.id));
+  for (const e of data.ledger) if (e.memberId && storeIds.includes(e.tx.storeId)) ids.add(e.memberId);
+  return ids;
 }
 
 export function createApp(repo: Repo, publicDir: string, options: AppOptions | (() => Date) = {}) {
   const opts = typeof options === 'function' ? { clock: options } : options;
   const clock = opts.clock ?? (() => new Date());
   const members = opts.memberApi ?? new MemberApi(repo, undefined, clock);
-  // Everyone is the jobber admin until sign-in exists.
-  const actor: Actor = ADMIN;
+  const portal = opts.adminPassword ? new PortalAuthService(repo, opts.adminPassword, clock) : undefined;
+  // Without a portal password (local development) everyone is the master admin.
+  const OPEN: SignedIn = { actor: ADMIN, user: { id: 'master', name: 'Jobber admin', email: 'admin', role: 'admin', storeIds: [] } };
 
-  async function api(req: IncomingMessage, url: URL): Promise<[number, unknown]> {
+  async function api(req: IncomingMessage, url: URL, who: SignedIn): Promise<[number, unknown]> {
     const path = url.pathname.replace(/^\/api/, '');
     const m = (pattern: RegExp) => pattern.exec(path);
     const method = req.method ?? 'GET';
-    const views = () => repo.data.rules.map((r) => ruleView(repo, r, clock()));
+    const actor = who.actor;
+    const mine = visibleStores(who);
+    const isAdmin = !mine;
+    const adminOnly = () => {
+      if (!isAdmin) throw new ConsoleError('Only an admin can do that.', 403);
+    };
+    const myStores = () => (mine ? repo.data.stores.filter((s) => mine.includes(s.id)) : repo.data.stores);
+    // Store users see corporate rules that reach their locations plus their own offers.
+    const ruleVisible = (r: ConsoleRule) => isAdmin || myStores().some((s) => inScope(r.scope, s));
+    const views = () => repo.data.rules.filter(ruleVisible).map((r) => ruleView(repo, r, clock()));
+    const memberVisible = (() => {
+      let ids: Set<string> | undefined;
+      return (id: string) => isAdmin || (ids ??= visibleMemberIds(repo.data, mine!)).has(id);
+    })();
     let match: RegExpExecArray | null;
+
+    if (method === 'GET' && path === '/me') return [200, { user: who.user, signInRequired: Boolean(portal) }];
 
     if (method === 'GET' && path === '/bootstrap') {
       const d = repo.data;
@@ -117,10 +153,11 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
         200,
         {
           actor,
+          me: who.user,
           branding: d.branding,
           settings: d.settings,
-          stores: d.stores,
-          groups: d.groups,
+          stores: myStores(),
+          groups: isAdmin ? d.groups : [],
           rules: views(),
           presets: PRESETS,
           categories: CATEGORIES.map(({ id, label }) => ({ id, label })),
@@ -152,7 +189,11 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
     }
     if ((match = m(/^\/rules\/([\w-]+)$/))) {
       const id = match[1]!;
-      if (method === 'GET') return [200, ruleView(repo, repo.rule(id), clock())];
+      if (method === 'GET') {
+        const rule = repo.rule(id);
+        if (!ruleVisible(rule)) throw new ConsoleError('Rule not found.', 404);
+        return [200, ruleView(repo, rule, clock())];
+      }
       if (method === 'PUT') return [200, ruleView(repo, repo.updateRule(id, await body<Partial<RuleInput>>(req), actor), clock())];
     }
     if (method === 'POST' && (match = m(/^\/rules\/([\w-]+)\/status$/))) {
@@ -160,7 +201,7 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
       return [200, ruleView(repo, repo.setRuleStatus(match[1]!, status, actor), clock())];
     }
 
-    if (method === 'GET' && path === '/stores') return [200, { stores: repo.data.stores, groups: repo.data.groups }];
+    if (method === 'GET' && path === '/stores') return [200, { stores: myStores(), groups: isAdmin ? repo.data.groups : [] }];
     if (method === 'PUT' && (match = m(/^\/stores\/([\w-]+)$/))) {
       const store = await body<ConsoleStore>(req);
       return [200, repo.upsertStore({ ...withoutNulls(store), id: match[1]! } as ConsoleStore, actor)];
@@ -178,14 +219,22 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
       const q = (url.searchParams.get('q') ?? '').toLowerCase().replace(/[^\w ]/g, '');
       const digits = q.replace(/\D/g, '');
       const list = repo.data.members.filter(
-        (mm) => !q || mm.name.toLowerCase().includes(q) || (digits.length >= 3 && mm.phone.includes(digits)),
+        (mm) => memberVisible(mm.id) && (!q || mm.name.toLowerCase().includes(q) || (digits.length >= 3 && mm.phone.includes(digits))),
       );
       return [200, { total: list.length, members: list.slice(-200).reverse() }];
     }
-    if (method === 'POST' && path === '/members') return [201, repo.createMember(await body(req), actor)];
+    if (method === 'POST' && path === '/members') {
+      const input = await body<{ homeStoreId?: string; name: string; phone: string }>(req);
+      if (mine && !(input.homeStoreId && mine.includes(input.homeStoreId))) input.homeStoreId = mine[0];
+      return [201, repo.createMember(input, actor)];
+    }
     if ((match = m(/^\/members\/([\w-]+)$/)) && method === 'GET') {
       const member = repo.member(match[1]!);
-      const visits = repo.data.ledger.filter((e) => e.memberId === member.id).slice(-20).reverse();
+      if (!memberVisible(member.id)) throw new ConsoleError('Member not found.', 404);
+      const visits = repo.data.ledger
+        .filter((e) => e.memberId === member.id && (!mine || mine.includes(e.tx.storeId)))
+        .slice(-20)
+        .reverse();
       return [200, { member, visits }];
     }
     if (method === 'POST' && (match = m(/^\/members\/([\w-]+)\/points$/))) {
@@ -199,7 +248,24 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
       const view = url.searchParams.get('view') === 'all' ? 'all' : 'pilot';
       return [200, computeResults(repo.data, view, clock())];
     }
-    if (method === 'GET' && path === '/history') return [200, repo.data.history.slice(0, 200)];
+    if (method === 'GET' && path === '/history') {
+      adminOnly();
+      return [200, repo.data.history.slice(0, 200)];
+    }
+    if (method === 'GET' && path === '/users') {
+      adminOnly();
+      return [200, portal ? portal.users() : []];
+    }
+    if ((method === 'POST' && path === '/users') || (method === 'PUT' && (match = m(/^\/users\/([\w-]+)$/)))) {
+      if (!portal) throw new ConsoleError('Portal sign-in is off here, so there are no users to manage. Set VGO_ADMIN_PASSWORD to turn it on.');
+      const input = await body<Partial<PortalUser> & { password?: string }>(req);
+      return [method === 'POST' ? 201 : 200, portal.saveUser({ ...input, id: match?.[1] }, actor)];
+    }
+    if (method === 'DELETE' && (match = m(/^\/users\/([\w-]+)$/))) {
+      if (!portal) throw new ConsoleError('Portal sign-in is off here.');
+      portal.removeUser(match[1]!, actor);
+      return [200, { ok: true }];
+    }
     if (method === 'POST' && path === '/sample/clear') {
       repo.clearSampleData(actor);
       return [200, { ok: true }];
@@ -268,17 +334,36 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
   return createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     try {
-      const memberSide = url.pathname === '/app' || url.pathname.startsWith('/app/') || url.pathname.startsWith('/api/app/');
-      if (opts.adminPassword && !memberSide && !passwordMatches(req.headers.authorization, opts.adminPassword)) {
-        res.writeHead(401, { 'www-authenticate': 'Basic realm="VGO Rewards console", charset="UTF-8"' });
-        return res.end('Sign in to the VGO Rewards console.');
-      }
       if (url.pathname.startsWith('/api/app/')) {
         const [status, data] = await appApi(req, url);
         return send(res, status, data);
       }
       if (url.pathname.startsWith('/api/')) {
-        const [status, data] = await api(req, url);
+        const path = url.pathname;
+        const secure = req.headers['x-forwarded-proto'] === 'https';
+        const setCookie = (value: string, maxAge: number) =>
+          res.setHeader('set-cookie', `${COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? '; Secure' : ''}`);
+        if (path === '/api/login' && req.method === 'POST') {
+          if (!portal) return send(res, 200, { user: OPEN.user });
+          const { email, password } = await body<{ email?: string; password?: string }>(req);
+          const { token, signedIn } = portal.signIn(email, password);
+          setCookie(encodeURIComponent(token), 14 * 86_400);
+          return send(res, 200, { user: signedIn.user });
+        }
+        if (path === '/api/logout' && req.method === 'POST') {
+          portal?.signOut(cookie(req, COOKIE));
+          setCookie('', 0);
+          return send(res, 200, { ok: true });
+        }
+        let who = portal ? portal.fromToken(cookie(req, COOKIE)) : OPEN;
+        // The POS link signs its calls with the POS key instead of a portal sign-in.
+        if (!who && path.startsWith('/api/pos/') && opts.posKey) {
+          const key = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1];
+          if (key && sameSecret(key, opts.posKey)) who = OPEN;
+        }
+        if (!who) return send(res, 401, { error: 'Please sign in.' });
+        if (path.startsWith('/api/pos/') && who.user.role !== 'admin') return send(res, 403, { error: 'Only the POS link or an admin can do that.' });
+        const [status, data] = await api(req, url, who);
         return send(res, status, data);
       }
       if (url.pathname === '/app') {

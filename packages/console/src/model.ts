@@ -97,6 +97,28 @@ export interface AppAuth {
   sessions: Record<string, { memberId: string; expiresAt: string }>;
 }
 
+/** Someone who signs in to the back-office portal. */
+export interface PortalUser {
+  id: string;
+  name: string;
+  /** Lowercase; used to sign in. */
+  email: string;
+  /** Admins see and change everything; store users see only their own locations. */
+  role: 'admin' | 'store';
+  /** The locations a store user can see and run offers for. */
+  storeIds: string[];
+  /** scrypt$salt$hash */
+  passwordHash: string;
+  createdAt: string;
+  lastSignInAt?: string;
+}
+
+/** Portal sign-in state. Session tokens are stored hashed. */
+export interface PortalAuth {
+  users: PortalUser[];
+  sessions: Record<string, { userId: string; expiresAt: string }>;
+}
+
 export interface ChangeEntry {
   at: string;
   userId: string;
@@ -114,6 +136,7 @@ export interface ConsoleData {
   settings: ProgramSettings;
   history: ChangeEntry[];
   auth?: AppAuth;
+  portal?: PortalAuth;
   /** Data updates already applied to this file; see migrate.ts. */
   migrations?: string[];
   /** When the pilot started, for "day 45 of 90" on Results. */
