@@ -1,6 +1,7 @@
 // Starts the console: `npm run console`, then open http://localhost:4310.
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { fileMediaStore, upstashMediaStore } from './media.js';
 import { MemberApi } from './member-api.js';
 import { upstashConfigFromEnv, upstashStore } from './remote-store.js';
 import { Repo } from './repo.js';
@@ -42,6 +43,7 @@ createApp(repo, resolve(process.env.VGO_PUBLIC ?? 'packages/console/public'), {
   memberApi,
   adminPassword,
   posKey: process.env.VGO_POS_KEY || undefined,
+  media: upstash ? upstashMediaStore(upstash) : fileMediaStore(resolve(dirname(dataFile), 'media')),
 }).listen(port, host, () => {
   console.log(`VGO Rewards console: http://localhost:${port}   member app: http://localhost:${port}/app/   (data: ${upstash ? 'Upstash' : dataFile}, texts: ${sms.name})`);
 });

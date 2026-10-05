@@ -117,6 +117,7 @@ export class Repo {
         this.data.groups.map((g) => g.id),
       ),
       ...(rule.effect && rule.scope ? ruleViolations(rule, actor, this.policy()) : []),
+      ...(rule.artwork?.mediaId && !this.data.media?.some((m) => m.id === rule.artwork!.mediaId) ? ['That artwork was removed. Upload it again.'] : []),
     ];
   }
 

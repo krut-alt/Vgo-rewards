@@ -185,3 +185,34 @@ body.signed-out .nav a, body.store-user .nav a[data-admin] { display: none; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { font-size: 13px; padding: 2px 10px; border-radius: 999px; background: var(--chip-bg, rgba(0,0,0,.06)); }
 .geo-box { border-left: 3px solid var(--accent); padding: 4px 0 4px 14px; margin: 4px 0 8px; }
+
+/* Reward artwork: one 16:9 size everywhere */
+.art-frame { position: relative; aspect-ratio: 16 / 9; width: 100%; border-radius: 12px; overflow: hidden; background: var(--main); }
+.art-frame > img:not(.poster-logo) { width: 100%; height: 100%; object-fit: cover; display: block; }
+.art-frame.poster { display: flex; align-items: center; padding: 0 7%; container-type: inline-size; }
+.art-frame.poster.fuel { background: linear-gradient(120deg, #0f2747 0%, #1d4a85 70%, #c8102e 70.2%, #c8102e 74%, #0f2747 74.2%); }
+.art-frame.poster.food { background: linear-gradient(135deg, #c8102e 0%, #e2552b 100%); }
+.art-frame.poster.brand { background: linear-gradient(135deg, #1b1f27 0%, #3a4553 100%); }
+.art-frame.poster.other { background: linear-gradient(135deg, #fff1a8 0%, #ffd23f 100%); }
+.poster-text { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; color: #fff; font-size: 13cqw; line-height: 0.92; max-width: 72%; text-transform: uppercase; letter-spacing: 0.5px; }
+.art-frame.poster.other .poster-text { color: #8a0b1f; }
+.poster-logo { position: absolute; right: 5%; bottom: 8%; width: 18%; opacity: 0.95; }
+.app-card { background: #fff; border: 1px solid var(--line, #dcdfe3); border-radius: 16px; overflow: hidden; }
+.app-card .art-frame { border-radius: 0; }
+.app-card-body { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 6px; }
+.app-card-body .kicker { font-size: 12px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: #8a0b1f; }
+.app-card-body .title { font-size: 20px; font-weight: 700; line-height: 1.15; }
+.app-card-body .line { font-size: 14px; color: #55606e; }
+.app-card-body .tag { align-self: flex-start; background: var(--accent); color: #fff; border-radius: 10px; padding: 3px 10px; font-size: 12px; font-weight: 700; }
+.art-drop { border: 2px dashed #b8c0cc; border-radius: 14px; padding: 10px; margin: 6px 0 10px; }
+.art-drop.over { border-color: var(--accent); background: rgba(200, 16, 46, 0.04); }
+.art-empty { aspect-ratio: 16 / 9; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; }
+.art-library { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; max-height: 60vh; overflow: auto; margin: 10px 0; }
+.art-pick { background: none; border: 1px solid transparent; border-radius: 12px; padding: 4px; text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+.art-pick:hover { border-color: var(--accent); }
+.row.wrap { flex-wrap: wrap; }
+.offer-name { display: flex; align-items: center; gap: 12px; }
+.offer-name .thumb { width: 72px; flex-shrink: 0; }
+.offer-name .thumb .art-frame { border-radius: 6px; }
+.offer-name .thumb .poster-logo { display: none; }
+.feat { display: inline-block; margin-left: 8px; font-size: 11px; font-weight: 700; background: #fff1a8; color: #8a0b1f; border-radius: 8px; padding: 1px 7px; vertical-align: middle; }

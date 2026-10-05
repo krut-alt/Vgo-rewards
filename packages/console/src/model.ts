@@ -1,4 +1,5 @@
 import type { ItemCatalog } from './items.js';
+import type { MediaInfo } from './media.js';
 // Console data model: what the jobber manages, stored as one JSON document for the pilot.
 import type { Rule, StoreId, Transaction } from '../../engine/src/index.js';
 
@@ -16,6 +17,12 @@ export interface ConsoleRule extends Rule {
    * store, and they add it to their card there. Redeemed at the register like any card offer.
    */
   geofence?: { radiusMiles: number };
+  /** Artwork shown on the reward in the app (an uploaded flyer or picture, stored at 1200×675). */
+  artwork?: { mediaId: string };
+  /** Big promo text on the app card when there is no artwork, e.g. "25¢ OFF". Made from the reward when empty. */
+  headline?: string;
+  /** Shown in the big slider at the top of the app's home screen. */
+  featured?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -66,6 +73,12 @@ export interface ConsoleMember {
   email?: string;
   /** Agreed to offer emails; can be changed in the app. */
   emailOptIn?: boolean;
+  /** When the member last turned offer texts or emails on, kept as proof of consent. */
+  smsOptInAt?: string;
+  emailOptInAt?: string;
+  /** Month and day only (MM-DD), for birthday rewards. */
+  birthday?: string;
+  zip?: string;
   /** Agreed to offer texts at sign-up; can be changed in the app. */
   smsOptIn?: boolean;
   /** Offers the member added to their card in the app. */
@@ -150,6 +163,8 @@ export interface ConsoleData {
   history: ChangeEntry[];
   auth?: AppAuth;
   portal?: PortalAuth;
+  /** Uploaded reward artwork; the image bytes live in the media store. */
+  media?: MediaInfo[];
   /** The latest uploaded pricebook. */
   items?: ItemCatalog;
   /** Data updates already applied to this file; see migrate.ts. */

@@ -19,11 +19,12 @@ import {
   typeLabel,
 } from './labels.js';
 import type { ConsoleData, ConsoleRule, ConsoleStore, PortalUser } from './model.js';
-import { MemberApi } from './member-api.js';
+import { MemberApi, offerKind, promoHeadline } from './member-api.js';
 import { PortalAuthService, type SignedIn } from './portal-auth.js';
 import { PRESETS } from './presets.js';
 import { ConsoleError, Repo, withoutNulls, type RuleInput } from './repo.js';
 import { spotFrom } from './geo.js';
+import { mediaUrl, memoryMediaStore, readUpload, type MediaStore } from './media.js';
 import { parseItemsCsv, searchItems } from './items.js';
 import { computeResults } from './results.js';
 import { ADMIN } from './seed.js';
@@ -49,6 +50,9 @@ export function ruleView(repo: Repo, rule: ConsoleRule, now = new Date()) {
       funded: fundedLabel(rule),
       reward: rewardLabel(rule),
       memberLine: memberLine(rule),
+      headline: promoHeadline(rule),
+      artKind: offerKind(rule),
+      imageUrl: rule.artwork ? mediaUrl(rule.artwork.mediaId) : null,
     },
   };
 }
@@ -91,6 +95,8 @@ export interface AppOptions {
   adminPassword?: string;
   /** Key the POS link sends as `Authorization: Bearer <key>` to reach /api/pos. */
   posKey?: string;
+  /** Where reward artwork is kept. Defaults to memory (tests and local tries). */
+  media?: MediaStore;
 }
 
 const COOKIE = 'vgo_portal';
@@ -123,6 +129,9 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
   const opts = typeof options === 'function' ? { clock: options } : options;
   const clock = opts.clock ?? (() => new Date());
   const members = opts.memberApi ?? new MemberApi(repo, undefined, clock);
+  const media = opts.media ?? memoryMediaStore();
+  // Recently shown artwork, so the app doesn't fetch the same image from storage on every view.
+  const mediaCache = new Map<string, Buffer>();
   const portal = opts.adminPassword ? new PortalAuthService(repo, opts.adminPassword, clock) : undefined;
   // Without a portal password (local development) everyone is the master admin.
   const OPEN: SignedIn = { actor: ADMIN, user: { id: 'master', name: 'Jobber admin', email: 'admin', role: 'admin', storeIds: [] } };
@@ -258,6 +267,31 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
     if (method === 'GET' && path === '/history') {
       adminOnly();
       return [200, repo.data.history.slice(0, 200)];
+    }
+    if (method === 'GET' && path === '/media') return [200, [...(repo.data.media ?? [])].reverse()];
+    if (method === 'POST' && path === '/media') {
+      const { dataUrl, name } = await body<{ dataUrl?: string; name?: string }>(req, 3_000_000);
+      const { info, bytes } = readUpload(dataUrl, name, actor.userId, clock());
+      await media.put(info.id, bytes);
+      mediaCache.set(info.id, bytes);
+      (repo.data.media ??= []).push(info);
+      repo.note(actor, `Uploaded artwork "${info.name}"`);
+      repo.save();
+      return [201, info];
+    }
+    if (method === 'DELETE' && (match = m(/^\/media\/(\w+)$/))) {
+      adminOnly();
+      const id = match[1]!;
+      const users = repo.data.rules.filter((r) => r.artwork?.mediaId === id);
+      if (users.length) throw new ConsoleError(`"${users[0]!.name}" uses this artwork. Change its artwork first.`, 409);
+      const info = repo.data.media?.find((x) => x.id === id);
+      if (!info) throw new ConsoleError('Artwork not found.', 404);
+      repo.data.media = repo.data.media!.filter((x) => x.id !== id);
+      await media.remove(id);
+      mediaCache.delete(id);
+      repo.note(actor, `Removed artwork "${info.name}"`);
+      repo.save();
+      return [200, { ok: true }];
     }
     if (method === 'GET' && path === '/items') {
       adminOnly();
@@ -397,6 +431,22 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
         if (path.startsWith('/api/pos/') && who.user.role !== 'admin') return send(res, 403, { error: 'Only the POS link or an admin can do that.' });
         const [status, data] = await api(req, url, who);
         return send(res, status, data);
+      }
+      const art = /^\/media\/(\w+)$/.exec(url.pathname);
+      if (art && req.method === 'GET') {
+        const info = repo.data.media?.find((x) => x.id === art[1]);
+        let bytes = info && mediaCache.get(info.id);
+        if (info && !bytes) {
+          bytes = await media.get(info.id);
+          if (bytes) {
+            if (mediaCache.size >= 200) mediaCache.delete(mediaCache.keys().next().value!);
+            mediaCache.set(info.id, bytes);
+          }
+        }
+        if (!info || !bytes) return send(res, 404, { error: 'Not found.' });
+        // Ids are never reused, so the image can be cached for good.
+        res.writeHead(200, { 'content-type': info.type, 'cache-control': 'public, max-age=31536000, immutable', 'content-length': bytes.length });
+        return res.end(bytes);
       }
       if (url.pathname === '/app') {
         res.writeHead(302, { location: '/app/' });

@@ -19,6 +19,7 @@ const SESSION_DAYS = 90;
 const FOOD_DRINK = ['coffee', 'fountain', 'sandwiches', 'hot-food', 'snacks', 'candy', 'energy', 'cold-drinks', 'beer', 'ice'];
 
 import { nearestWithin, type Spot } from './geo.js';
+import { mediaUrl } from './media.js';
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 const digits = (phone: unknown) => String(phone ?? '').replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
 
@@ -33,6 +34,10 @@ export interface AppOffer {
   clipped: boolean;
   /** A near-store promo, unlocked because the member is close to a participating store. */
   nearby?: boolean;
+  /** Uploaded artwork, always 16:9. Cards without it show `headline` on a colored panel. */
+  imageUrl?: string;
+  headline: string;
+  featured: boolean;
 }
 
 export interface RedeemOption {
@@ -42,9 +47,42 @@ export interface RedeemOption {
   detail: string;
   costPoints: number;
   affordable: boolean;
+  imageUrl?: string;
+  headline: string;
   selected: boolean;
 }
 
+
+export function offerKind(r: ConsoleRule): AppOffer['kind'] {
+  const e = r.effect;
+  const cats = 'categories' in e ? (e.categories ?? []) : [];
+  return r.fundedBy === 'manufacturer' ? 'brand' : e.type === 'fuelDiscount' ? 'fuel' : cats.some((c) => FOOD_DRINK.includes(c)) ? 'food' : 'other';
+}
+
+/** The big text on a reward card without artwork, like "25¢ OFF" or "6TH FREE". */
+export function promoHeadline(r: ConsoleRule): string {
+  if (r.headline?.trim()) return r.headline.trim();
+  const e = r.effect;
+  const money = (c: number) => (c % 100 === 0 ? `$${c / 100}` : c < 100 ? `${c}¢` : `$${(c / 100).toFixed(2)}`);
+  switch (e.type) {
+    case 'fuelDiscount':
+      return `${e.centsPerGallon}¢ OFF A GALLON`;
+    case 'itemDiscount':
+      return e.percentOff === 100 ? 'FREE' : e.percentOff !== undefined ? `${e.percentOff}% OFF` : `${money(e.centsOff ?? 0)} OFF`;
+    case 'basketDiscount':
+      return `${money(e.centsOff)} OFF`;
+    case 'punchCard': {
+      const n = e.every + 1;
+      return `${n}${n % 10 === 2 && n !== 12 ? 'ND' : n % 10 === 3 && n !== 13 ? 'RD' : 'TH'} ONE FREE`;
+    }
+    case 'pointsFlat':
+      return `+${e.points} POINTS`;
+    case 'pointsPerDollar':
+      return `${e.points}X POINTS`;
+    case 'pointsPerGallon':
+      return `${e.points} PTS A GALLON`;
+  }
+}
 
 /** Empty means no email. Throws on something that is not an email address. */
 function cleanEmail(raw: unknown): string | undefined {
@@ -133,7 +171,9 @@ export class MemberApi {
       if (email) {
         member.email = email;
         member.emailOptIn = Boolean(signup?.emailOptIn);
+        if (member.emailOptIn) member.emailOptInAt = this.clock().toISOString();
       }
+      if (member.smsOptIn) member.smsOptInAt = this.clock().toISOString();
       isNew = true;
     }
     delete this.auth.codes[phone];
@@ -184,9 +224,7 @@ export class MemberApi {
   private offerView(r: ConsoleRule, m: ConsoleMember): AppOffer {
     const { stores, groups } = this.repo.data;
     const e = r.effect;
-    const cats = 'categories' in e ? (e.categories ?? []) : [];
-    const kind: AppOffer['kind'] =
-      r.fundedBy === 'manufacturer' ? 'brand' : e.type === 'fuelDiscount' ? 'fuel' : cats.some((c) => FOOD_DRINK.includes(c)) ? 'food' : 'other';
+    const kind = offerKind(r);
     const where =
       r.scope.kind === 'all' ? 'all stores' : r.scope.kind === 'stores' && r.scope.storeIds.length === 1 ? 'this store only' : targetLabel(r.scope, stores, groups);
     const label = { fuel: 'Fuel', food: 'Food and drink', brand: 'Brand offer', other: 'Offer' }[kind];
@@ -200,6 +238,9 @@ export class MemberApi {
       ends: r.schedule?.endsAt ? shortDate(lastDay(r.schedule.endsAt)) : undefined,
       how: r.requiresClip ? 'clip' : e.type === 'punchCard' ? 'punch' : e.type === 'fuelDiscount' ? 'auto-pump' : 'auto-register',
       clipped: m.clippedRuleIds?.includes(r.id) ?? false,
+      ...(r.artwork ? { imageUrl: mediaUrl(r.artwork.mediaId) } : {}),
+      headline: promoHeadline(r),
+      featured: Boolean(r.featured),
     };
   }
 
@@ -243,6 +284,8 @@ export class MemberApi {
                 : `Uses ${costPoints} of your ${m.pointsBalance} points`,
             costPoints,
             affordable: costPoints <= m.pointsBalance,
+            ...(r.artwork ? { imageUrl: mediaUrl(r.artwork.mediaId) } : {}),
+            headline: promoHeadline(r),
             selected: m.nextVisitRedeem?.includes(r.id) ?? false,
           },
         ];
@@ -284,6 +327,10 @@ export class MemberApi {
         return { ruleId: r.id, name: r.name, count: m.punches[e.cardId] ?? 0, every: e.every };
       });
 
+    const allOffers = this.offers(m).offers;
+    const marked = allOffers.filter((o) => o.featured);
+    const featured = (marked.length ? marked : allOffers.filter((o) => o.imageUrl)).slice(0, 6);
+
     const hour = localParts(this.clock()).hour;
     const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
     return {
@@ -294,6 +341,8 @@ export class MemberApi {
         smsOptIn: m.smsOptIn ?? false,
         email: m.email ?? '',
         emailOptIn: m.emailOptIn ?? false,
+        birthday: m.birthday ?? '',
+        zip: m.zip ?? '',
         visitCount: m.visitCount,
         homeStore: { id: store.id, name: store.name, city: store.city, state: store.state, loyaltyLive: store.loyaltyLive },
       },
@@ -304,9 +353,9 @@ export class MemberApi {
       redeem,
       punchCards,
       // The welcome reward and punch cards have their own cards above.
-      offers: this.offers(m)
-        .offers.filter((o) => o.how !== 'punch' && !freeFuel.some((f) => f.ruleId === o.ruleId))
-        .slice(0, 2),
+      offers: allOffers.filter((o) => o.how !== 'punch' && !freeFuel.some((f) => f.ruleId === o.ruleId)).slice(0, 6),
+      // The slider at the top of home: offers marked "feature", else the ones with artwork.
+      featured,
     };
   }
 
@@ -338,13 +387,36 @@ export class MemberApi {
     return this.redeemOptions(m);
   }
 
-  updateAccount(m: ConsoleMember, patch: { firstName?: unknown; smsOptIn?: unknown; homeStoreId?: unknown; email?: unknown; emailOptIn?: unknown }): void {
+  updateAccount(
+    m: ConsoleMember,
+    patch: { firstName?: unknown; smsOptIn?: unknown; homeStoreId?: unknown; email?: unknown; emailOptIn?: unknown; birthday?: unknown; zip?: unknown },
+  ): void {
+    const now = this.clock().toISOString();
+    if (patch.birthday !== undefined) {
+      const b = String(patch.birthday ?? '').trim();
+      const md = /^(\d{1,2})[-/](\d{1,2})$/.exec(b);
+      if (!b) delete m.birthday;
+      else if (!md || +md[1]! < 1 || +md[1]! > 12 || +md[2]! < 1 || +md[2]! > new Date(2024, +md[1]!, 0).getDate())
+        throw new ConsoleError('Pick the month and day of your birthday.');
+      else m.birthday = `${md[1]!.padStart(2, '0')}-${md[2]!.padStart(2, '0')}`;
+    }
+    if (patch.zip !== undefined) {
+      const z = String(patch.zip ?? '').trim();
+      if (!z) delete m.zip;
+      else if (!/^\d{5}$/.test(z)) throw new ConsoleError('Enter a 5-digit ZIP code.');
+      else m.zip = z;
+    }
+    if (patch.smsOptIn !== undefined && Boolean(patch.smsOptIn) && !m.smsOptIn) m.smsOptInAt = now;
     if (patch.email !== undefined) {
       const email = cleanEmail(patch.email);
       if (email) m.email = email;
       else delete m.email;
     }
-    if (patch.emailOptIn !== undefined) m.emailOptIn = Boolean(patch.emailOptIn) && Boolean(m.email);
+    if (patch.emailOptIn !== undefined) {
+      const on = Boolean(patch.emailOptIn) && Boolean(m.email);
+      if (on && !m.emailOptIn) m.emailOptInAt = now;
+      m.emailOptIn = on;
+    }
     if (patch.firstName !== undefined) {
       const name = String(patch.firstName).trim();
       if (!name) throw new ConsoleError('Enter your first name.');
@@ -393,6 +465,7 @@ export class MemberApi {
             headline,
             cta: e?.type === 'fuelDiscount' ? `Join and get ${e.centsPerGallon}¢ off` : 'Join free',
             fine: e?.type === 'fuelDiscount' ? `Up to ${e.maxGallons} gallons.` : '',
+            ...(welcome.artwork ? { imageUrl: mediaUrl(welcome.artwork.mediaId) } : {}),
           }
         : { headline, cta: 'Join free', fine: '' },
       stores: d.stores.map((s) => ({ id: s.id, name: s.name, city: s.city, state: s.state, loyaltyLive: s.loyaltyLive })),

@@ -318,7 +318,11 @@ function renderOffers() {
                 h(
                   'tr',
                   { class: 'click', tabindex: 0, onclick: () => (location.hash = `#/offers/${r.id}`), onkeydown: (e) => e.key === 'Enter' && (location.hash = `#/offers/${r.id}`) },
-                  h('td', { class: 'strong' }, r.name),
+                  h(
+                    'td',
+                    { class: 'strong' },
+                    h('div', { class: 'offer-name' }, h('div', { class: 'thumb' }, artFrame({ imageUrl: r.display.imageUrl, headline: r.display.headline, kind: r.display.artKind })), h('span', {}, r.name, r.featured && h('span', { class: 'feat' }, 'Featured'))),
+                  ),
                   h('td', {}, r.display.type),
                   h('td', {}, r.display.target),
                   h('td', {}, r.display.funded),
@@ -390,6 +394,9 @@ function blankForm() {
     requiresClip: false,
     geofence: false,
     radiusMiles: 1,
+    mediaId: null,
+    headline: '',
+    featured: false,
   };
 }
 
@@ -409,6 +416,9 @@ function formFromRule(rule) {
     requiresClip: rule.requiresClip ?? false,
     geofence: Boolean(rule.geofence),
     radiusMiles: rule.geofence?.radiusMiles ?? 1,
+    mediaId: rule.artwork?.mediaId ?? null,
+    headline: rule.headline ?? '',
+    featured: rule.featured ?? false,
     starts: rule.schedule?.startsAt ? localYmd(rule.schedule.startsAt) : '',
     ends: rule.schedule?.endsAt ? addDaysYmd(localYmd(rule.schedule.endsAt), -1) : '',
     days: rule.schedule?.daysOfWeek ?? [],
@@ -528,6 +538,9 @@ function ruleFromForm(f) {
     welcome: f.welcome || null,
     requiresClip: f.requiresClip || (f.section === 'offer' && f.geofence) || null,
     geofence: f.section === 'offer' && f.geofence ? { radiusMiles: Number(f.radiusMiles) } : null,
+    artwork: f.mediaId ? { mediaId: f.mediaId } : null,
+    headline: f.headline.trim() || null,
+    featured: f.featured || null,
   };
   if (f.id) rule.id = f.id;
   return rule;
@@ -872,6 +885,7 @@ function renderOfferForm(id) {
             field('Budget cap per month ($)', text('budget', { inputmode: 'decimal', placeholder: 'No cap' }), 'Stops the discount once it has cost this much in a month.'),
           ),
         ),
+        artSection(f, set),
         errors,
         actions,
       ),
@@ -888,14 +902,19 @@ function renderOfferForm(id) {
         h(
           'section',
           { class: 'card pad step' },
-          h('h2', {}, 'Member preview'),
+          h('h2', {}, 'How it looks in the app'),
           h(
             'div',
-            { class: 'preview-card' },
-            h('span', { class: 'kicker' }, v ? `${v.display.type} · ${v.display.target}` : 'Offer'),
-            h('span', { class: 'title' }, rule.name || 'Offer name'),
-            h('span', { class: 'line' }, v ? v.display.memberLine : ''),
-            v && h('span', { class: 'tag' }, v.display.runs),
+            { class: 'app-card' },
+            artFrame({ imageUrl: f.mediaId ? `/media/${f.mediaId}` : null, headline: v?.display.headline ?? (f.headline || 'YOUR DEAL'), kind: v?.display.artKind ?? 'other', name: rule.name }),
+            h(
+              'div',
+              { class: 'app-card-body' },
+              h('span', { class: 'kicker' }, v ? `${v.display.type} · ${v.display.target}` : 'Offer'),
+              h('span', { class: 'title' }, rule.name || 'Offer name'),
+              h('span', { class: 'line' }, v ? v.display.memberLine : ''),
+              v && h('span', { class: 'tag' }, v.display.runs),
+            ),
           ),
         ),
         h(
@@ -1831,7 +1850,22 @@ async function memberDialog(id) {
       { class: 'note' },
       `Phone ending ${m.phone.slice(-4)} · joined ${new Date(m.joinedAt).toLocaleDateString()} · ${m.visitCount} visits · home store ${m.homeStoreId ? storeName(m.homeStoreId) : 'not set'}`,
     ),
-    h('p', { class: 'note' }, m.email ? `Email ${m.email}${m.emailOptIn ? ' · gets offer emails' : ''}` : 'No email on file', ` · ${m.smsOptIn ? 'gets offer texts' : 'no offer texts'}`),
+    h(
+      'p',
+      { class: 'note' },
+      [
+        m.email ? `Email ${m.email}` : 'No email on file',
+        m.birthday && `Birthday ${new Date(2024, Number(m.birthday.slice(0, 2)) - 1, Number(m.birthday.slice(3))).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}`,
+        m.zip && `ZIP ${m.zip}`,
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    ),
+    h(
+      'p',
+      { class: 'note' },
+      `Offer texts: ${m.smsOptIn ? `yes${m.smsOptInAt ? `, agreed ${new Date(m.smsOptInAt).toLocaleDateString()}` : ''}` : 'no'} · Offer emails: ${m.emailOptIn ? `yes${m.emailOptInAt ? `, agreed ${new Date(m.emailOptInAt).toLocaleDateString()}` : ''}` : 'no'}`,
+    ),
     h('div', { class: 'kpi card' }, h('span', { class: 'label' }, 'Points balance'), h('span', { class: 'value' }, m.pointsBalance.toLocaleString())),
     Object.keys(m.punches).length > 0 && h('p', { class: 'note' }, `Punch cards: ${Object.entries(m.punches).map(([k, v]) => `${k} ${v}`).join(', ')}`),
     h(
@@ -2119,6 +2153,163 @@ async function renderResults() {
       ),
       h('a', { class: 'btn', href: '#/stores' }, 'Manage locations'),
     ),
+  );
+}
+
+
+// ---------- Reward artwork ----------
+
+const ART_W = 1200;
+const ART_H = 675;
+
+/** The 16:9 picture on an app card: the uploaded art, or the headline on a colored panel. */
+function artFrame({ imageUrl, headline, kind, name }) {
+  if (imageUrl) return h('div', { class: 'art-frame' }, h('img', { src: imageUrl, alt: name ? `${name} artwork` : 'Reward artwork', loading: 'lazy' }));
+  return h('div', { class: `art-frame poster ${kind || 'other'}` }, h('span', { class: 'poster-text' }, headline), h('img', { class: 'poster-logo', src: boot.branding.logoDataUrl || '/vgo-logo.png', alt: '' }));
+}
+
+function loadImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('That file is not an image this browser can read. Use a JPG, PNG or WebP.'));
+    img.src = url;
+  });
+}
+
+/**
+ * Resizes any picture to the one standard reward size. "fill" crops to fill the frame;
+ * "fit" keeps the whole flyer and fills the sides with a blurred copy of it.
+ */
+async function standardArt(file, fit) {
+  const img = await loadImage(file);
+  const c = document.createElement('canvas');
+  c.width = ART_W;
+  c.height = ART_H;
+  const ctx = c.getContext('2d');
+  const cover = Math.max(ART_W / img.width, ART_H / img.height);
+  const drawAt = (scale) => {
+    const w = img.width * scale;
+    const hh = img.height * scale;
+    ctx.drawImage(img, (ART_W - w) / 2, (ART_H - hh) / 2, w, hh);
+  };
+  if (fit === 'fit') {
+    ctx.filter = 'blur(28px) brightness(0.75)';
+    drawAt(cover * 1.1);
+    ctx.filter = 'none';
+    drawAt(Math.min(ART_W / img.width, ART_H / img.height));
+  } else drawAt(cover);
+  let q = 0.86;
+  let url = c.toDataURL('image/jpeg', q);
+  while (url.length > 1_800_000 && q > 0.5) url = c.toDataURL('image/jpeg', (q -= 0.1));
+  return url;
+}
+
+/** Tall or square flyers keep their whole picture; wide photos fill the frame. */
+const autoFit = (img) => (img.width / img.height < 1.45 ? 'fit' : 'fill');
+
+async function uploadArt(file, fit) {
+  const dataUrl = await standardArt(file, fit);
+  return api('POST', '/media', { dataUrl, name: file.name });
+}
+
+async function artLibraryDialog(onPick) {
+  const items = await api('GET', '/media');
+  openDialog(
+    h('h2', {}, 'Artwork library'),
+    h('p', { class: 'note' }, 'Everything uploaded so far. Pick one to use it on this reward.'),
+    items.length
+      ? h(
+          'div',
+          { class: 'art-library' },
+          items.map((m) =>
+            h(
+              'button',
+              { class: 'art-pick', type: 'button', onclick: () => (closeDialog(), onPick(m.id)) },
+              h('div', { class: 'art-frame' }, h('img', { src: `/media/${m.id}`, alt: '', loading: 'lazy' })),
+              h('span', { class: 'note' }, m.name),
+            ),
+          ),
+        )
+      : h('p', {}, 'No artwork yet.'),
+    h('div', { class: 'row' }, h('div', { class: 'grow' }), h('button', { class: 'btn ghost', onclick: closeDialog }, 'Close')),
+  );
+}
+
+function artSection(f, set) {
+  const status = h('div', {});
+  const file = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp,image/gif', hidden: true });
+  const useFile = async (picked, fit) => {
+    status.replaceChildren(h('p', { class: 'note' }, 'Sizing and uploading…'));
+    try {
+      f.artFile = picked;
+      f.artFit = fit ?? autoFit(await loadImage(picked));
+      const info = await uploadArt(picked, f.artFit);
+      set({ mediaId: info.id }, true);
+    } catch (err) {
+      status.replaceChildren(errorBox(err));
+    }
+  };
+  file.onchange = () => file.files?.[0] && useFile(file.files[0]);
+  const drop = h(
+    'div',
+    {
+      class: 'art-drop',
+      ondragover: (e) => (e.preventDefault(), e.currentTarget.classList.add('over')),
+      ondragleave: (e) => e.currentTarget.classList.remove('over'),
+      ondrop: (e) => {
+        e.preventDefault();
+        e.currentTarget.classList.remove('over');
+        const picked = e.dataTransfer.files?.[0];
+        if (picked) useFile(picked);
+      },
+    },
+    f.mediaId ? h('div', { class: 'art-frame' }, h('img', { src: `/media/${f.mediaId}`, alt: 'Current artwork' })) : h('div', { class: 'art-empty' }, h('b', {}, 'Drop a flyer or picture here'), h('span', { class: 'note' }, 'or use the buttons below. Any size works.')),
+  );
+  return h(
+    'section',
+    { class: 'card pad step' },
+    h('h2', {}, '5. Artwork and app display'),
+    h(
+      'p',
+      { class: 'note' },
+      `Every picture is resized to the same ${ART_W}×${ART_H} banner, so all rewards line up in the app. Without artwork, the app shows the headline on a colored banner.`,
+    ),
+    drop,
+    file,
+    status,
+    h(
+      'div',
+      { class: 'row wrap' },
+      h('button', { class: 'btn', type: 'button', onclick: () => file.click() }, f.mediaId ? 'Replace artwork' : 'Upload artwork'),
+      h('button', { class: 'btn ghost', type: 'button', onclick: () => artLibraryDialog((id) => ((f.artFile = null), set({ mediaId: id }, true))) }, 'Choose from library'),
+      f.mediaId && h('button', { class: 'btn ghost', type: 'button', onclick: () => ((f.artFile = null), set({ mediaId: null }, true)) }, 'Remove'),
+    ),
+    f.mediaId &&
+      f.artFile &&
+      h(
+        'div',
+        { class: 'pills', role: 'radiogroup', 'aria-label': 'How the picture fits' },
+        h('span', { class: 'note' }, 'Fit'),
+        [
+          ['fit', 'Show the whole flyer'],
+          ['fill', 'Fill the banner (crops edges)'],
+        ].map(([v, l]) =>
+          h('button', { type: 'button', role: 'radio', 'aria-checked': f.artFit === v, class: `pill${f.artFit === v ? ' on' : ''}`, onclick: () => f.artFit !== v && useFile(f.artFile, v) }, l),
+        ),
+      ),
+    h(
+      'div',
+      { class: 'grid2' },
+      h(
+        'label',
+        { class: 'field' },
+        h('span', {}, 'Banner headline (when there is no artwork)'),
+        h('input', { type: 'text', maxlength: 28, value: f.headline, placeholder: 'Made from the reward, e.g. 25¢ OFF A GALLON', oninput: (e) => set({ headline: e.target.value }) }),
+      ),
+    ),
+    h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: f.featured, onchange: (e) => set({ featured: e.target.checked }) }), 'Feature it in the big slider at the top of the app home screen'),
   );
 }
 
