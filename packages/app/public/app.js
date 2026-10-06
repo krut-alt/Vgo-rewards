@@ -90,7 +90,8 @@ function toast(text) {
 }
 
 function openSheet(...children) {
-  sheetBody.replaceChildren(...children);
+  // Lists of buttons arrive as arrays: flatten them, or they show up as "[object HTMLButtonElement]".
+  sheetBody.replaceChildren(...children.flat(Infinity).filter((c) => c !== undefined && c !== null && c !== false));
   if (!sheet.open) sheet.showModal();
 }
 sheet.addEventListener('click', (e) => e.target === sheet && sheet.close());
