@@ -127,7 +127,7 @@ a { color: var(--main); font-weight: 600; }
 .tabs a { min-height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-decoration: none; font-size: 12px; font-weight: 400; color: var(--muted); }
 .tabs a.on { font-weight: 700; color: var(--main); }
 
-dialog { border: 0; border-radius: 20px 20px 0 0; padding: 0; width: 100%; max-width: 480px; margin: auto auto 0; color: var(--main); }
+dialog { border: 0; border-radius: 20px 20px 0 0; padding: 0; width: 100%; max-width: 480px; max-height: 85vh; overflow-y: auto; margin: auto auto 0; color: var(--main); }
 dialog::backdrop { background: rgba(15, 39, 71, 0.45); }
 #sheet-body { padding: 20px; display: flex; flex-direction: column; gap: 12px; max-height: 80vh; overflow: auto; }
 .toast { position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%); background: var(--main); color: #fff; padding: 12px 18px; border-radius: 12px; font-weight: 600; z-index: 10; }
