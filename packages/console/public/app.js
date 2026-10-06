@@ -1615,6 +1615,14 @@ function storeDialog(store, draft) {
   const errors = h('div', {});
   const field = (label, input, hint) => h('label', { class: 'field' }, h('span', {}, label), input, hint ? h('span', { class: 'hint' }, hint) : null);
   const text = (key, attrs = {}) => h('input', { value: s[key] ?? '', oninput: (e) => (s[key] = e.target.value), ...attrs });
+  // Gas prices typed here are sent separately; untouched grades keep what the POS reported.
+  s.priceEdits ??= {};
+  const priceInput = (g) => {
+    const p = s.fuelPrices?.[g.id];
+    const shown = s.priceEdits[g.id] ?? (p ? (p.cents / 100).toFixed(3) : '');
+    const hint = p && s.priceEdits[g.id] === undefined ? `${p.source === 'pos' ? 'From the POS' : 'Set by hand'}, ${new Date(p.at).toLocaleString()}` : null;
+    return field(g.label, h('input', { value: shown, inputmode: 'decimal', placeholder: '3.199', oninput: (e) => (s.priceEdits[g.id] = e.target.value.trim()) }), hint);
+  };
   openDialog(
     h('h2', {}, isNew ? 'Add a location' : s.name),
     h('h3', { class: 'dialog-section' }, 'Site'),
@@ -1663,6 +1671,9 @@ function storeDialog(store, draft) {
       field('Promo line (optional)', text('tagline', { maxlength: 80, placeholder: 'Hot food, cold drinks, free air' })),
       field('Hours (optional)', text('hours', { maxlength: 80, placeholder: 'Open 24 hours' })),
     ),
+    h('h3', { class: 'dialog-section' }, 'Gas prices in the app'),
+    h('p', { class: 'note' }, 'Once the POS link is live, prices update from every fuel sale. Type a price here to set or correct it, or clear it to hide that grade. Prices older than 7 days are hidden from members.'),
+    h('div', { class: 'grid2' }, boot.grades.map(priceInput)),
     field(
       'Groups',
       h(
@@ -1692,6 +1703,27 @@ function storeDialog(store, draft) {
     h(
       'div',
       { class: 'row' },
+      !isNew &&
+        s.id !== boot.pilot.storeId &&
+        h(
+          'button',
+          {
+            class: 'btn ghost',
+            onclick: async () => {
+              if (!confirm(`Delete ${s.name}? It comes off the map and the store list. Past sales stay in Results, and offers that ran only here are retired.`)) return;
+              try {
+                await api('DELETE', `/stores/${s.id}`);
+                await reload();
+                closeDialog();
+                toast('Location deleted');
+                render();
+              } catch (err) {
+                errors.replaceChildren(errorBox(err));
+              }
+            },
+          },
+          'Delete location',
+        ),
       h('div', { class: 'grow' }),
       h('button', { class: 'btn ghost', onclick: closeDialog }, 'Cancel'),
       h(
@@ -1701,6 +1733,13 @@ function storeDialog(store, draft) {
           onclick: async () => {
             try {
               const body = { ...s };
+              const priceEdits = body.priceEdits;
+              delete body.priceEdits;
+              if (Object.values(priceEdits).some((v) => v !== '' && !/^\$?\d{1,2}(\.\d{1,3})?$/.test(v))) {
+                const msg = 'Enter gas prices in dollars per gallon, like 3.199.';
+                throw Object.assign(new Error(msg), { problems: [msg] });
+              }
+              delete body.fuelPrices;
               for (const k of ['address', 'zip', 'contactName', 'email', 'phone', 'posSiteId', 'tagline', 'hours', 'photoMediaId']) if (!String(body[k] ?? '').trim()) body[k] = null;
               if (body.mapSpot !== undefined) {
                 const nums = body.mapSpot.match(/-?\d+(?:\.\d+)?/g) ?? [];
@@ -1709,8 +1748,11 @@ function storeDialog(store, draft) {
                 else (body.lat = Number(nums[0])), (body.lng = Number(nums[1]));
                 delete body.mapSpot;
               }
-              if (isNew) await api('POST', '/stores', body);
-              else await api('PUT', `/stores/${s.id}`, body);
+              const saved = isNew ? await api('POST', '/stores', body) : await api('PUT', `/stores/${s.id}`, body);
+              if (Object.keys(priceEdits).length) {
+                const prices = Object.fromEntries(Object.entries(priceEdits).map(([g, v]) => [g, v === '' ? null : v]));
+                await api('PUT', `/stores/${saved.id}/fuel-prices`, { prices });
+              }
               await reload();
               closeDialog();
               toast(isNew ? 'Location added' : 'Location saved');
@@ -1734,7 +1776,7 @@ function storePhotoField(s) {
     box.replaceChildren(
       h('span', {}, 'Store photo (optional)'),
       s.photoMediaId ? h('div', { class: 'art-frame', style: 'max-width:320px' }, h('img', { src: `/media/${s.photoMediaId}`, alt: 'Store photo' })) : h('span', { class: 'hint' }, 'Without a photo, the app shows the store name on a VGO banner.'),
-      status ?? null,
+      status ?? '',
       h(
         'div',
         { class: 'row wrap' },
@@ -2674,25 +2716,98 @@ function userDialog(user) {
 // ---------- Items catalog ----------
 
 let itemQuery = '';
+/** Which list the Items page shows: '*' (all stores) or a store id. */
+let itemStore = '*';
+
+const uploadWhere = (u) => (u.storeIds.length ? u.storeIds.map(storeName).join(', ') : 'All stores');
+
+/** Asks where a new pricebook goes, then uploads it. */
+function itemUploadDialog(f, after) {
+  let target = itemStore === '*' ? 'all' : 'some';
+  let picked = new Set(itemStore === '*' ? [] : [itemStore]);
+  const errors = h('div', {});
+  const pick = h('div', { class: 'pills' });
+  const drawPick = () =>
+    pick.replaceChildren(
+      ...(target === 'some'
+        ? boot.stores.map((st) =>
+            h('label', { class: 'pill' }, h('input', { type: 'checkbox', checked: picked.has(st.id), onchange: (e) => (e.target.checked ? picked.add(st.id) : picked.delete(st.id)) }), ` ${st.name}`),
+          )
+        : []),
+    );
+  const radio = (value, label) =>
+    h('label', { class: 'row', style: 'flex-wrap: nowrap' }, h('input', { type: 'radio', name: 'item-target', checked: target === value, onchange: () => ((target = value), drawPick()) }), h('span', {}, label));
+  drawPick();
+  openDialog(
+    h('h2', {}, 'Upload items'),
+    h('p', { class: 'note' }, `${f.name} · ${Math.max(1, Math.round(f.size / 1024)).toLocaleString()} KB`),
+    radio('all', 'All stores (used by every store that has no list of its own)'),
+    radio('some', 'Only these stores (they keep this list until you upload another for them)'),
+    pick,
+    errors,
+    h(
+      'div',
+      { class: 'row' },
+      h('div', { class: 'grow' }),
+      h('button', { class: 'btn ghost', onclick: closeDialog }, 'Cancel'),
+      h(
+        'button',
+        {
+          class: 'btn accent',
+          onclick: async (e) => {
+            if (target === 'some' && !picked.size) return errors.replaceChildren(errorBox(new Error('Choose at least one store.')));
+            e.target.disabled = true;
+            errors.replaceChildren(h('p', { class: 'note' }, 'Uploading…'));
+            try {
+              const storeIds = target === 'all' ? [] : [...picked];
+              const res = await api('POST', '/items/upload', { csv: await f.text(), fileName: f.name, storeIds });
+              closeDialog();
+              toast(`${res.count.toLocaleString()} items uploaded for ${uploadWhere(res.upload)}`);
+              itemQuery = '';
+              if (storeIds.length && !storeIds.includes(itemStore)) itemStore = storeIds[0];
+              if (!storeIds.length) itemStore = '*';
+              await after(res);
+            } catch (err) {
+              e.target.disabled = false;
+              errors.replaceChildren(errorBox(err));
+            }
+          },
+        },
+        'Upload',
+      ),
+    ),
+  );
+}
+
+async function downloadItemUpload(u) {
+  const { fileName, csv } = await api('GET', `/items/uploads/${u.id}/file`);
+  const a = h('a', { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: fileName });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
 
 async function renderItems() {
-  const r = await api('GET', `/items?q=${encodeURIComponent(itemQuery)}`);
+  const r = await api('GET', `/items?store=${encodeURIComponent(itemStore)}&q=${encodeURIComponent(itemQuery)}`);
   const file = h('input', { type: 'file', accept: '.csv,.txt,text/csv', hidden: true });
   const status = h('div', {});
-  file.onchange = async () => {
+  file.onchange = () => {
     const f = file.files?.[0];
-    if (!f) return;
-    status.replaceChildren(h('p', { class: 'note' }, `Reading ${f.name}…`));
-    try {
-      const res = await api('POST', '/items/upload', { csv: await f.text(), fileName: f.name });
-      toast(`${res.count.toLocaleString()} items uploaded`);
-      itemQuery = '';
-      await renderItems();
-      if (res.skipped) main.prepend(h('div', { class: 'notice' }, `${res.skipped.toLocaleString()} rows were skipped because they had no SKU, UPC or name.`));
-    } catch (err) {
-      status.replaceChildren(errorBox(err));
-    }
+    file.value = '';
+    if (f)
+      itemUploadDialog(f, async (res) => {
+        await renderItems();
+        if (res.skipped) main.prepend(h('div', { class: 'notice' }, `${res.skipped.toLocaleString()} rows were skipped because they had no SKU, UPC or name.`));
+      });
   };
+  const ownLists = new Set(r.storeLists.map((x) => x.storeId));
+  const storePicker = h(
+    'select',
+    { 'aria-label': 'Item list for', onchange: (e) => ((itemStore = e.target.value), (itemQuery = ''), renderItems()) },
+    h('option', { value: '*', selected: itemStore === '*' }, 'All stores'),
+    boot.stores.map((st) => h('option', { value: st.id, selected: itemStore === st.id }, `${st.name}${ownLists.has(st.id) ? ' (own list)' : ''}`)),
+  );
   const search = h('input', {
     type: 'search',
     placeholder: 'Search by name, SKU, UPC or department',
@@ -2705,20 +2820,36 @@ async function renderItems() {
       }
     },
   });
+  const where = itemStore === '*' ? 'All stores' : storeName(itemStore);
+  const lede = r.count
+    ? `${where}: ${r.count.toLocaleString()} items${r.fileName ? ` from ${r.fileName}` : ''}${r.uploadedAt ? `, uploaded ${new Date(r.uploadedAt).toLocaleString()}` : ''}.${itemStore !== '*' && !r.ownList ? ' This store uses the all-stores list.' : ''}`
+    : 'Upload your latest pricebook so item rewards can be tied to exact SKUs and UPCs. Each upload can go to all stores or to chosen stores.';
   main.replaceChildren(
-    pageHead(
-      'Items',
-      r.count
-        ? `${r.count.toLocaleString()} items from ${r.fileName || 'the last upload'}, uploaded ${new Date(r.uploadedAt).toLocaleString()}. Item rewards will be tied to these SKUs and UPCs.`
-        : 'Upload your latest pricebook so item rewards can be tied to exact SKUs and UPCs.',
-      h('button', { class: 'btn accent', onclick: () => file.click() }, r.count ? 'Upload a new catalog' : 'Upload catalog'),
-      file,
-    ),
+    pageHead('Items', lede, h('button', { class: 'btn accent', onclick: () => file.click() }, 'Upload items'), file),
     status,
+    h(
+      'div',
+      { class: 'row wrap' },
+      h('label', { class: 'row' }, h('span', { class: 'note' }, 'Show the list for'), storePicker),
+      itemStore !== '*' &&
+        r.ownList &&
+        h(
+          'button',
+          {
+            class: 'btn ghost',
+            onclick: async () => {
+              await api('DELETE', `/items/stores/${itemStore}`);
+              toast(`${where} now uses the all-stores list`);
+              renderItems();
+            },
+          },
+          'Use the all-stores list instead',
+        ),
+    ),
     h(
       'p',
       { class: 'note' },
-      'Use a CSV export from your back office or POS. The first row names the columns: SKU or Item code, UPC, Name or Description, Department, Price. A new upload replaces the whole catalog.',
+      'Use a CSV export from your back office or POS. The first row names the columns: SKU or Item code, UPC, Name or Description, Department, Price. A store with its own list uses it; every other store uses the all-stores list. Every upload is kept below with its date and file.',
     ),
     r.count > 0 && h('div', { class: 'row' }, search, h('span', { class: 'note' }, `${r.total.toLocaleString()} match${r.total === 1 ? '' : 'es'}${r.total > r.items.length ? `, showing the first ${r.items.length}` : ''}`)),
     r.count > 0 &&
@@ -2742,6 +2873,33 @@ async function renderItems() {
                 h('td', {}, i.department ?? ''),
                 h('td', {}, i.category ? catLabel(i.category) : ''),
                 h('td', { class: 'num' }, i.priceCents === undefined ? '' : money(i.priceCents)),
+              ),
+            ),
+          ),
+        ),
+      ),
+    r.uploads.length > 0 && h('h3', { class: 'dialog-section' }, itemStore === '*' ? 'Upload history' : `Upload history for ${where}`),
+    r.uploads.length > 0 &&
+      h(
+        'div',
+        { class: 'card table-wrap' },
+        h(
+          'table',
+          { style: 'min-width: 640px' },
+          h('thead', {}, h('tr', {}, ['Uploaded', 'File', 'Stores', 'Items', '', ''].map((t, i) => h('th', { class: i === 3 ? 'num' : '' }, t)))),
+          h(
+            'tbody',
+            {},
+            r.uploads.map((u) =>
+              h(
+                'tr',
+                {},
+                h('td', {}, new Date(u.uploadedAt).toLocaleString()),
+                h('td', {}, u.fileName ?? ''),
+                h('td', {}, uploadWhere(u)),
+                h('td', { class: 'num' }, u.count.toLocaleString()),
+                h('td', {}, u.current.length ? h('span', { class: 'badge Live' }, 'In use') : ''),
+                h('td', {}, u.fileKept && h('button', { class: 'btn ghost', onclick: () => downloadItemUpload(u).catch((err) => toast(err.message)) }, 'Download')),
               ),
             ),
           ),

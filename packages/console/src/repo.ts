@@ -197,6 +197,9 @@ export class Repo {
     }
     // A new address with the old map spot left in place gets looked up again.
     const was = this.data.stores.find((s) => s.id === store.id);
+    // Gas prices change on their own (POS link, price editor), never through the location form.
+    delete store.fuelPrices;
+    if (was?.fuelPrices) store.fuelPrices = was.fuelPrices;
     if (was && store.lat === was.lat && store.lng === was.lng && (['address', 'city', 'state', 'zip'] as const).some((k) => (store[k] ?? '') !== (was[k] ?? ''))) {
       delete store.lat;
       delete store.lng;
@@ -232,6 +235,30 @@ export class Repo {
     this.log(actor, `${store.name} is now ${live ? 'live on' : 'offline from'} the rewards network`);
     this.save();
     return store;
+  }
+
+  /**
+   * Removes a location. Past sales stay in Results under the old name; members who called it home
+   * move to the pilot store, and offers that ran only there are retired.
+   */
+  deleteStore(id: string, actor: Actor): void {
+    if (actor.role !== 'jobber-admin') throw new ConsoleError('Only a jobber admin can change stores.', 403);
+    const d = this.data;
+    const store = this.store(id);
+    if (id === d.pilot.storeId) throw new ConsoleError(`${store.name} is the pilot store and can’t be deleted.`, 409);
+    if (store.loyaltyLive) throw new ConsoleError(`${store.name} is live. Set it to Offline before deleting it.`, 409);
+    d.stores = d.stores.filter((s) => s.id !== id);
+    for (const m of d.members) if (m.homeStoreId === id) m.homeStoreId = d.pilot.storeId;
+    for (const r of d.rules) {
+      if (r.scope.kind !== 'stores' || !r.scope.storeIds.includes(id)) continue;
+      const ids = r.scope.storeIds.filter((s) => s !== id);
+      if (ids.length) r.scope = { kind: 'stores', storeIds: ids };
+      else if (r.status !== 'retired') r.status = 'retired';
+    }
+    for (const u of d.portal?.users ?? []) u.storeIds = u.storeIds.filter((s) => s !== id);
+    if (d.currentItems) delete d.currentItems[id];
+    this.log(actor, `Deleted location ${store.name}`);
+    this.save();
   }
 
   upsertGroup(group: StoreGroup, storeIds: string[] | undefined, actor: Actor): StoreGroup {

@@ -209,6 +209,13 @@ dialog::backdrop { background: rgba(15, 39, 71, 0.45); }
 .row-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
 .row-btns .pill-btn { min-height: 40px; font-size: 14px; }
 .filter svg { width: 16px; height: 16px; vertical-align: -3px; }
+.fuel-prices { display: grid; gap: 4px; margin: 2px 0; }
+.fuel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: 6px; }
+.fuel-price { display: grid; gap: 1px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.fuel-price .sub { font-size: 12px; }
+.fuel-price b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.fuel-price sup { font-size: 11px; }
+.sub.small { font-size: 12px; }
 .map-pop { font-family: 'Barlow', system-ui, sans-serif; font-size: 14px; line-height: 1.4; }
 .map-pop b { display: block; font-size: 15px; }
 

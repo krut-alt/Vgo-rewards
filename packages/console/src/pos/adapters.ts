@@ -14,7 +14,7 @@ export interface PosLinkAdapter {
   write(answer: LinkAnswer): unknown;
 }
 
-const OPS: LinkOp[] = ['identify', 'rewards', 'finalize', 'cancel'];
+const OPS: LinkOp[] = ['identify', 'rewards', 'finalize', 'cancel', 'prices'];
 
 function bad(message: string): never {
   throw new ConsoleError(message, 400);
@@ -38,6 +38,9 @@ function num(o: Record<string, unknown>, key: string, required = true): number |
   if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) bad(`"${key}" must be a number, 0 or more.`);
   return v;
 }
+
+/** Pump prices run to a tenth of a cent. */
+const tenths = (cents: number) => Math.round(cents * 10) / 10;
 
 function readLine(v: unknown, i: number): LinkLine {
   const o = obj(v, `lines[${i}]`);
@@ -66,7 +69,7 @@ function readSale(o: Record<string, unknown>): LinkSale {
     at: str(o, 'at')!,
     loyaltyId: str(o, 'loyaltyId', false),
     lines: lines.map(readLine),
-    ...(fuel ? { fuel: { grade: str(fuel, 'grade')!, gallons: num(fuel, 'gallons', false), pricePerGallonCents: Math.round(num(fuel, 'pricePerGallonCents')!) } } : {}),
+    ...(fuel ? { fuel: { grade: str(fuel, 'grade')!, gallons: num(fuel, 'gallons', false), pricePerGallonCents: tenths(num(fuel, 'pricePerGallonCents')!) } } : {}),
     ...(redeem ? { redeem: redeem as string[] } : {}),
   };
 }
@@ -96,6 +99,18 @@ export const vgoAdapter: PosLinkAdapter = {
       }
       case 'cancel':
         return { op: 'cancel', siteId: str(o, 'siteId')!, linkTxId: str(o, 'linkTxId')! };
+      case 'prices': {
+        const prices = o.prices;
+        if (!Array.isArray(prices) || prices.length > 20) bad('"prices" must be a list of up to 20 grades.');
+        return {
+          op: 'prices',
+          siteId: str(o, 'siteId')!,
+          prices: prices.map((p, i) => {
+            const x = obj(p, `prices[${i}]`);
+            return { grade: str(x, 'grade')!, pricePerGallonCents: tenths(num(x, 'pricePerGallonCents')!), at: str(x, 'at', false) };
+          }),
+        };
+      }
     }
   },
   write(answer) {
