@@ -273,6 +273,7 @@ export function evaluate(
   const result: EvaluationResult = {
     pointsEarned: 0,
     pointsSpent: 0,
+    earned: [],
     discounts: [],
     punches: {},
     appliedRuleIds: [],
@@ -296,6 +297,7 @@ export function evaluate(
     balance -= o.pointsCost;
     result.pointsSpent += o.pointsCost;
     result.pointsEarned += o.points;
+    if (o.points) result.earned!.push({ ruleId: o.rule.id, points: o.points });
     if (discount) result.discounts.push(discount);
     if (o.punch) result.punches[o.punch.cardId] = o.punch.count;
     result.appliedRuleIds.push(o.rule.id);

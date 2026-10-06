@@ -186,6 +186,15 @@ const MIGRATIONS: { id: string; run: (d: ConsoleData) => void }[] = [
     id: '2026-10-missed-spots',
     run: placeMissedSites,
   },
+  {
+    // Krut, Oct 2026: dealers pay for the points their customers earn inside, and are credited when points
+    // are redeemed. Points on fuel stay jobber-funded.
+    id: '2026-10-dealers-fund-inside-points',
+    run: (d) => {
+      const rule = d.rules.find((r) => r.id === 'earn-inside');
+      if (rule?.fundedBy === 'jobber') rule.fundedBy = 'store';
+    },
+  },
 ];
 
 /** Applies the migrations this data hasn't had yet. Returns true when anything changed. */

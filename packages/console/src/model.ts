@@ -3,6 +3,7 @@ import type { MediaInfo } from './media.js';
 // Console data model: what the jobber manages, stored as one JSON document for the pilot.
 import type { Rule, RuleStatus, StoreId, Transaction } from '../../engine/src/index.js';
 import type { SkuposState } from './skupos.js';
+import type { ClosedMonth } from './statements.js';
 
 /** Where a rule shows up in the console. Earn and redeem live on Reward rules, the rest on Offers. */
 export type Section = 'earn' | 'redeem' | 'offer';
@@ -71,7 +72,17 @@ export interface ConsoleStore {
   fuelPrices?: Record<string, FuelPrice>;
   /** POS categories mapped for this store, e.g. "sandwiches". Offers on unmapped categories get a warning. */
   mappedCategories: string[];
+  /**
+   * Who runs the site, for statements. Corporate: we keep fuel and inside margins, so rewards are our own
+   * cost. Dealer: we supply fuel and the dealer keeps the site's margins, so the dealer is billed and credited.
+   * Unset sites are treated as corporate until someone picks.
+   */
+  siteType?: SiteType;
+  /** Monthly network fee for this dealer, in cents. Unset uses the program's default fee. */
+  networkFeeCents?: number;
 }
+
+export type SiteType = 'corporate' | 'dealer';
 
 export interface StoreGroup {
   id: string;
@@ -149,6 +160,13 @@ export interface ProgramSettings {
   /** Who runs the program, shown on the app's terms and privacy pages. */
   legal?: ProgramContact;
   /**
+   * What a site is charged for each point it issues from a store-funded earn rule, and what a point is
+   * worth on the points liability, in cents (decimals allowed, e.g. 0.5). Unset means 1¢.
+   */
+  pointChargeCents?: number;
+  /** Default monthly network fee for dealer sites, in cents. A location can set its own. */
+  networkFeeCents?: number;
+  /**
    * POS department (number or name, as the POS link sends it) to our category, for lines the
    * items catalog does not know, e.g. { "12": "tobacco" }. Names like "Cold Drinks" match on their own.
    */
@@ -172,6 +190,8 @@ export interface LedgerEntry {
   memberId?: string;
   pointsEarned: number;
   pointsSpent: number;
+  /** Points earned, by earn rule. Older entries don't have it; statements work it out from the rules. */
+  earned?: { ruleId: string; points: number }[];
   appliedRuleIds: string[];
   discounts: { ruleId: string; centsOff: number }[];
   sample?: boolean;
@@ -237,6 +257,10 @@ export interface ConsoleData {
   migrations?: string[];
   /** Skupos promotions: the current list, and a log of every daily update. */
   skupos?: SkuposState;
+  /** Monthly statements, frozen when each month closes (statements.ts). */
+  closedMonths?: ClosedMonth[];
+  /** YYYY-MM: the first month statements close; earlier months stay open. */
+  statementsSince?: string;
   /** When the pilot started, for "day 45 of 90" on Results. */
   pilot: { storeId: StoreId; startedOn: string; days: number };
 }

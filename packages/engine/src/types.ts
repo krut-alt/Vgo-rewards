@@ -166,6 +166,8 @@ export interface AppliedDiscount {
 export interface EvaluationResult {
   pointsEarned: number;
   pointsSpent: number;
+  /** Points earned, by the earn rule that gave them, so each rule's payer can be charged. */
+  earned?: { ruleId: string; points: number }[];
   discounts: AppliedDiscount[];
   punches: Record<string, number>; // new punch count per card after this transaction
   appliedRuleIds: string[];
