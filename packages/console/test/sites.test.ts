@@ -3,7 +3,7 @@ import type { Server } from 'node:http';
 import { afterAll, describe, expect, it } from 'vitest';
 import { storeSpotFiller } from '../src/geocode.js';
 import { MemberApi } from '../src/member-api.js';
-import { PILOT_SITE, placeSites, SITE_SPOTS, useRealSites, VGO_SITES } from '../src/migrate.js';
+import { PILOT_SITE, placeMissedSites, placeSites, SITE_SPOTS, siteNumber, useRealSites, VGO_SITES } from '../src/migrate.js';
 import { Repo } from '../src/repo.js';
 import { ADMIN, seedData } from '../src/seed.js';
 import { createApp } from '../src/server.js';
@@ -51,6 +51,37 @@ describe('real VGO sites', () => {
       expect(s.lng).toBeLessThan(-78);
     }
     expect(d.stores.find((s) => s.name === 'VGO #25')).toMatchObject({ lat: 34.84359, lng: -82.311589 });
+  });
+
+  it('pins the pilot as VGO #31 even when it was renamed or edited in the portal', () => {
+    const d = fresh().data;
+    // The pilot was edited before the real sites arrived, so it kept its own name and address,
+    // and a coming-soon VGO #31 was added next to it.
+    Object.assign(d.stores.find((s) => s.id === 'vgo-01')!, { name: 'VGO 31', address: 'West Georgia Rd', city: 'Simpsonville' });
+    useRealSites(d);
+    placeSites(d);
+    expect(d.stores.some((s) => s.id === 'vgo-31')).toBe(true);
+    expect(d.stores.find((s) => s.id === 'vgo-01')!.lat).toBeUndefined();
+    placeMissedSites(d);
+    expect(d.stores.some((s) => s.id === 'vgo-31')).toBe(false);
+    expect(d.stores.find((s) => s.id === 'vgo-01')).toMatchObject({ lat: SITE_SPOTS[31]![0], lng: SITE_SPOTS[31]![1] });
+    // A pin set by hand is kept, and an edited old placeholder isn't mistaken for a real site.
+    const d2 = fresh().data;
+    Object.assign(d2.stores.find((s) => s.id === 'vgo-05')!, { city: 'Anderson' });
+    Object.assign(d2.stores.find((s) => s.id === 'vgo-01')!, { name: 'VGO #31', lat: 34.7, lng: -82.2 });
+    placeMissedSites(d2);
+    expect(d2.stores.find((s) => s.id === 'vgo-01')).toMatchObject({ lat: 34.7, lng: -82.2 });
+    expect(d2.stores.find((s) => s.id === 'vgo-05')!.lat).toBeUndefined();
+    expect([siteNumber('VGO #31'), siteNumber('vgo 031'), siteNumber('VGO Express')]).toEqual([31, 31, undefined]);
+  });
+
+  it('keeps a coming-soon VGO #31 copy that members or offers already use', () => {
+    const d = fresh().data;
+    Object.assign(d.stores.find((s) => s.id === 'vgo-01')!, { name: 'VGO 31', city: 'Simpsonville' });
+    useRealSites(d);
+    d.members[0]!.homeStoreId = 'vgo-31';
+    placeMissedSites(d);
+    expect(d.stores.some((s) => s.id === 'vgo-31')).toBe(true);
   });
 
   it('leaves a site alone when its address was changed in the portal', () => {

@@ -4,7 +4,7 @@ import type { Actor } from '../../engine/src/index.js';
 import { NO_EARN_CATEGORIES } from './catalog.js';
 import { addDays, localMidnight, localParts } from './dates.js';
 import type { ConsoleData, ConsoleRule, ConsoleStore } from './model.js';
-import { REAL_SITES_MIGRATION } from './migrate.js';
+import { SITE_MIGRATIONS } from './migrate.js';
 import { Repo } from './repo.js';
 
 export const ADMIN: Actor = { role: 'jobber-admin', userId: 'krut' };
@@ -275,7 +275,7 @@ export function seedData(now = new Date(), { realSites = false } = {}): ConsoleD
     },
     history: [],
     pilot: { storeId: 'vgo-01', startedOn: pilotStart, days: pilotDays },
-    ...(realSites ? {} : { migrations: [REAL_SITES_MIGRATION] }),
+    ...(realSites ? {} : { migrations: [...SITE_MIGRATIONS] }),
   };
   const repo = new Repo(data, () => {}, () => now);
   addSampleActivity(repo, pilotStart, elapsed);
