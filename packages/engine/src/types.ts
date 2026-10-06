@@ -44,7 +44,9 @@ export type Condition =
    * The member's birthday: on the day itself, the 7 days starting on it, or the whole month.
    * Needs the member's birthday (month and day) and the transaction's store-local date.
    */
-  | { type: 'birthday'; window: 'day' | 'week' | 'month' };
+  | { type: 'birthday'; window: 'day' | 'week' | 'month' }
+  /** Only members at least this old on the store's local date, e.g. 21 for alcohol and tobacco. */
+  | { type: 'minAge'; years: number };
 
 export type Effect =
   | { type: 'pointsPerDollar'; points: number; categories?: string[]; excludeCategories?: string[] }
@@ -132,6 +134,8 @@ export interface Member {
   clippedRuleIds?: string[];
   /** Month and day, MM-DD. */
   birthday?: string;
+  /** Full date of birth, YYYY-MM-DD, given when joining. Age-limited rules need it. */
+  birthDate?: string;
 }
 
 /** How often each rule was already used by this member, per period. */

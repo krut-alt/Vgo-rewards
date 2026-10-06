@@ -12,6 +12,12 @@ let token = load('vgo.token');
 
 // ---------- helpers ----------
 
+/** The date `years` years ago today, YYYY-MM-DD: the latest birth date old enough to join. */
+function yearsAgo(years) {
+  const t = new Date();
+  return `${t.getFullYear() - years}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+}
+
 function load(key) {
   try {
     return localStorage.getItem(key);
@@ -119,7 +125,7 @@ function signOutLocal() {
 
 // ---------- sign up and sign in ----------
 
-let joinState = { mode: 'join', step: 'details', phone: '', firstName: '', email: '', emailOptIn: true, smsOptIn: true, homeStoreId: null, devCode: null, error: null };
+let joinState = { mode: 'join', step: 'details', phone: '', firstName: '', birthDate: '', email: '', emailOptIn: true, smsOptIn: true, homeStoreId: null, devCode: null, error: null };
 
 function renderJoin() {
   const s = joinState;
@@ -134,6 +140,13 @@ function renderJoin() {
       h('div', { class: 'field' }, h('label', { for: 'phone' }, 'Mobile number'), phone, h('span', { class: 'hint' }, 'This is your member ID. Type it on the PIN pad at checkout.')),
       s.mode === 'join' && [
         h('div', { class: 'field' }, h('label', { for: 'first' }, 'First name'), h('input', { id: 'first', type: 'text', autocomplete: 'given-name', placeholder: 'Jordan', value: s.firstName, oninput: (e) => (s.firstName = e.target.value) })),
+        h(
+          'div',
+          { class: 'field' },
+          h('label', { for: 'dob' }, 'Date of birth'),
+          h('input', { id: 'dob', type: 'date', autocomplete: 'bday', max: yearsAgo(config.minAge ?? 18), min: '1900-01-01', value: s.birthDate, oninput: (e) => (s.birthDate = e.target.value) }),
+          h('span', { class: 'hint' }, `You must be ${config.minAge ?? 18} or older to join. We’ll have a treat for your birthday.`),
+        ),
         h(
           'div',
           { class: 'field' },
@@ -206,6 +219,8 @@ async function sendCode() {
   const digits = s.phone.replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
   if (digits.length !== 10) return ((s.error = 'Enter your 10-digit mobile number.'), renderJoin());
   if (s.mode === 'join' && !s.firstName.trim()) return ((s.error = 'Enter your first name.'), renderJoin());
+  if (s.mode === 'join' && !s.birthDate) return ((s.error = 'Enter your date of birth.'), renderJoin());
+  if (s.mode === 'join' && s.birthDate > yearsAgo(config.minAge ?? 18)) return ((s.error = `Sorry, you must be ${config.minAge ?? 18} or older to join VGO Rewards.`), renderJoin());
   if (s.mode === 'join' && s.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.email.trim())) return ((s.error = 'Check the email address, or leave it blank.'), renderJoin());
   try {
     const res = await api('POST', '/code', { phone: digits });
@@ -222,7 +237,7 @@ async function verifyCode(code) {
     const res = await api('POST', '/verify', {
       phone: s.phone,
       code,
-      ...(s.mode === 'join' ? { firstName: s.firstName, smsOptIn: s.smsOptIn, homeStoreId: s.homeStoreId, email: s.email.trim(), emailOptIn: s.emailOptIn } : {}),
+      ...(s.mode === 'join' ? { firstName: s.firstName, birthDate: s.birthDate, smsOptIn: s.smsOptIn, homeStoreId: s.homeStoreId, email: s.email.trim(), emailOptIn: s.emailOptIn } : {}),
     });
     if (res.needsSignup) {
       // Signed in with a number that isn't a member yet: collect a name, then the same code still works.
@@ -296,7 +311,7 @@ function birthdayCard(b, m) {
       'section',
       { class: 'card row bday-nudge' },
       h('div', { class: 'icon-tile' }, svg(ICONS.cake)),
-      h('div', { class: 'grow' }, h('span', { class: 'title', style: 'font-size:18px' }, 'Get a birthday treat'), h('span', { class: 'sub' }, `Add your birthday and we’ll have ${b.name.replace(/^Birthday treat:\s*/i, 'a ').toLowerCase()} waiting.`)),
+      h('div', { class: 'grow' }, h('span', { class: 'title', style: 'font-size:18px' }, 'Get a birthday treat'), h('span', { class: 'sub' }, `Add your date of birth on Account and we’ll have ${b.name.replace(/^Birthday treat:\s*/i, 'a ').toLowerCase()} waiting.`)),
       h('a', { class: 'pill-btn', href: '#/account' }, 'Add'),
     );
   if (b.state === 'coming')
@@ -660,28 +675,21 @@ async function renderAccount() {
           h('input', { id: 'acct-email', type: 'email', inputmode: 'email', autocomplete: 'email', value: m.email }),
           h('span', { class: 'hint' }, 'Your phone number stays your member ID and how you sign in.'),
         ),
-        h(
-          'div',
-          { class: 'field' },
-          h('span', { class: 'label', id: 'bday-label' }, 'Birthday (optional)'),
-          h(
-            'div',
-            { class: 'two', role: 'group', 'aria-labelledby': 'bday-label' },
-            h(
-              'select',
-              { id: 'acct-bmonth', 'aria-label': 'Month' },
-              h('option', { value: '' }, 'Month'),
-              ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((mo, i) => h('option', { value: String(i + 1).padStart(2, '0'), selected: m.birthday.slice(0, 2) === String(i + 1).padStart(2, '0') }, mo)),
+        m.birthDate
+          ? h(
+              'div',
+              { class: 'field' },
+              h('span', { class: 'label' }, 'Date of birth'),
+              h('span', {}, new Date(`${m.birthDate}T12:00:00`).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })),
+              h('span', { class: 'hint' }, 'Ask the store if this needs fixing.'),
+            )
+          : h(
+              'div',
+              { class: 'field' },
+              h('label', { for: 'acct-dob' }, 'Date of birth'),
+              h('input', { id: 'acct-dob', type: 'date', autocomplete: 'bday', max: yearsAgo(config.minAge ?? 18), min: '1900-01-01' }),
+              h('span', { class: 'hint' }, 'Unlocks your birthday treat. Some offers are for ages 21 and up. You can set this once.'),
             ),
-            h(
-              'select',
-              { id: 'acct-bday', 'aria-label': 'Day' },
-              h('option', { value: '' }, 'Day'),
-              Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, '0')).map((d) => h('option', { value: d, selected: m.birthday.slice(3) === d }, String(Number(d)))),
-            ),
-          ),
-          h('span', { class: 'hint' }, 'We may send you a treat on your birthday. No year needed.'),
-        ),
         h(
           'div',
           { class: 'field' },
@@ -702,13 +710,7 @@ async function renderAccount() {
                   smsOptIn: document.getElementById('acct-sms').checked,
                   email: document.getElementById('acct-email').value,
                   emailOptIn: document.getElementById('acct-email-optin').checked,
-                  birthday: (() => {
-                    const mo = document.getElementById('acct-bmonth').value;
-                    const d = document.getElementById('acct-bday').value;
-                    if (!mo && !d) return '';
-                    if (!mo || !d) throw new Error('Pick both the month and day of your birthday.');
-                    return `${mo}-${d}`;
-                  })(),
+                  ...(!m.birthDate && document.getElementById('acct-dob').value ? { birthDate: document.getElementById('acct-dob').value } : {}),
                   zip: document.getElementById('acct-zip').value,
                 });
                 toast('Saved');

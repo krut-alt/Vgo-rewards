@@ -2,7 +2,7 @@
 // picking a points reward for the next visit. Members only ever see their own data.
 import { stockArtFor, stockArtUrl } from './stock-art.js';
 import { createHash, randomBytes, randomInt } from 'node:crypto';
-import { conditionPasses, inSchedule, inScope, type Actor, type Rule, type Transaction } from '../../engine/src/index.js';
+import { ageOn, conditionPasses, inSchedule, inScope, type Actor, type Rule, type Transaction } from '../../engine/src/index.js';
 import { localParts } from './dates.js';
 import { lastDay, memberLine, rewardLabel, targetLabel } from './labels.js';
 import { shortDate } from './dates.js';
@@ -17,6 +17,8 @@ const CODE_MINUTES = 10;
 const MAX_ATTEMPTS = 5;
 const MAX_CODES_PER_HOUR = 5;
 const SESSION_DAYS = 90;
+/** Members must be at least this old to join. */
+export const MIN_JOIN_AGE = 18;
 const FOOD_DRINK = ['coffee', 'fountain', 'sandwiches', 'hot-food', 'snacks', 'candy', 'energy', 'cold-drinks', 'beer', 'ice'];
 
 import { nearestWithin, type Spot } from './geo.js';
@@ -97,6 +99,21 @@ export function promoHeadline(r: ConsoleRule): string {
 }
 
 /** Empty means no email. Throws on something that is not an email address. */
+/**
+ * A date of birth as YYYY-MM-DD, from the app's date picker (YYYY-MM-DD) or typed as M/D/YYYY.
+ * Throws when it isn't a real past date.
+ */
+export function parseBirthDate(raw: unknown, todayYmd: string): string {
+  const s = String(raw ?? '').trim();
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);
+  const us = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s);
+  const [y, mo, d] = iso ? [+iso[1]!, +iso[2]!, +iso[3]!] : us ? [+us[3]!, +us[1]!, +us[2]!] : [0, 0, 0];
+  const ymd = `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  const real = y >= 1900 && mo >= 1 && mo <= 12 && d >= 1 && d <= new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  if (!real || ymd > todayYmd) throw new ConsoleError('Enter your date of birth, like 04/15/1990.');
+  return ymd;
+}
+
 function cleanEmail(raw: unknown): string | undefined {
   const email = String(raw ?? '').trim().toLowerCase();
   if (!email) return undefined;
@@ -157,7 +174,7 @@ export class MemberApi {
   verify(
     rawPhone: unknown,
     code: unknown,
-    signup?: { firstName?: string; smsOptIn?: boolean; homeStoreId?: string; email?: string; emailOptIn?: boolean },
+    signup?: { firstName?: string; smsOptIn?: boolean; homeStoreId?: string; email?: string; emailOptIn?: boolean; birthDate?: string },
   ): { token: string; isNew: boolean } | { needsSignup: true } {
     const phone = digits(rawPhone);
     const entry = this.auth.codes[phone];
@@ -174,6 +191,7 @@ export class MemberApi {
     if (!member) {
       const firstName = String(signup?.firstName ?? '').trim();
       if (!firstName) return { needsSignup: true };
+      const birthDate = this.adultBirthDate(signup?.birthDate);
       const email = cleanEmail(signup?.email);
       const live = this.repo.data.stores.find((s) => s.id === signup?.homeStoreId) ?? this.repo.data.stores.find((s) => s.id === this.repo.data.pilot.storeId);
       member = this.repo.createMember(
@@ -186,6 +204,8 @@ export class MemberApi {
         if (member.emailOptIn) member.emailOptInAt = this.clock().toISOString();
       }
       if (member.smsOptIn) member.smsOptInAt = this.clock().toISOString();
+      member.birthDate = birthDate;
+      member.birthday = birthDate.slice(5);
       isNew = true;
     }
     delete this.auth.codes[phone];
@@ -193,6 +213,23 @@ export class MemberApi {
     this.auth.sessions[sha(token)] = { memberId: member.id, expiresAt: new Date(now + SESSION_DAYS * 86_400_000).toISOString() };
     this.repo.save();
     return { token, isNew };
+  }
+
+  /** A date of birth for someone old enough to join, or an error saying why not. */
+  private adultBirthDate(raw: unknown): string {
+    const today = localParts(this.clock()).ymd;
+    if (raw === undefined || raw === null || String(raw).trim() === '') throw new ConsoleError('Enter your date of birth. VGO Rewards is for ages 18 and up.');
+    const birthDate = parseBirthDate(raw, today);
+    if (ageOn(birthDate, today) < MIN_JOIN_AGE) throw new ConsoleError(`Sorry, you must be ${MIN_JOIN_AGE} or older to join VGO Rewards.`);
+    return birthDate;
+  }
+
+  /** Back office: fix a member's date of birth (members can't change it once set). */
+  setBirthDate(m: ConsoleMember, raw: unknown): void {
+    const birthDate = this.adultBirthDate(raw);
+    m.birthDate = birthDate;
+    m.birthday = birthDate.slice(5);
+    this.repo.save();
   }
 
   memberFor(authorization: string | undefined): ConsoleMember {
@@ -230,7 +267,7 @@ export class MemberApi {
   /** Whether the member already meets the qualifiers that don't depend on what they buy. */
   private qualifiesNow(r: ConsoleRule, m: ConsoleMember): boolean {
     const emptyTx: Transaction = { id: 'probe', storeId: '', at: this.clock().toISOString(), localHour: 12, localDayOfWeek: 0, localDate: localParts(this.clock()).ymd, items: [] };
-    return r.conditions.every((c) => (c.type === 'firstVisit' || c.type === 'memberTag' || c.type === 'birthday' ? conditionPasses(c, emptyTx, m) : true));
+    return r.conditions.every((c) => (c.type === 'firstVisit' || c.type === 'memberTag' || c.type === 'birthday' || c.type === 'minAge' ? conditionPasses(c, emptyTx, m) : true));
   }
 
   private artFields(r: ConsoleRule): { imageUrl?: string; stockArtUrl?: string } {
@@ -370,6 +407,7 @@ export class MemberApi {
         email: m.email ?? '',
         emailOptIn: m.emailOptIn ?? false,
         birthday: m.birthday ?? '',
+        birthDate: m.birthDate ?? '',
         zip: m.zip ?? '',
         visitCount: m.visitCount,
         homeStore: { id: store.id, name: store.name, city: store.city, state: store.state, loyaltyLive: store.loyaltyLive },
@@ -418,16 +456,15 @@ export class MemberApi {
 
   updateAccount(
     m: ConsoleMember,
-    patch: { firstName?: unknown; smsOptIn?: unknown; homeStoreId?: unknown; email?: unknown; emailOptIn?: unknown; birthday?: unknown; zip?: unknown },
+    patch: { firstName?: unknown; smsOptIn?: unknown; homeStoreId?: unknown; email?: unknown; emailOptIn?: unknown; birthDate?: unknown; zip?: unknown },
   ): void {
     const now = this.clock().toISOString();
-    if (patch.birthday !== undefined) {
-      const b = String(patch.birthday ?? '').trim();
-      const md = /^(\d{1,2})[-/](\d{1,2})$/.exec(b);
-      if (!b) delete m.birthday;
-      else if (!md || +md[1]! < 1 || +md[1]! > 12 || +md[2]! < 1 || +md[2]! > new Date(2024, +md[1]!, 0).getDate())
-        throw new ConsoleError('Pick the month and day of your birthday.');
-      else m.birthday = `${md[1]!.padStart(2, '0')}-${md[2]!.padStart(2, '0')}`;
+    // Date of birth: added once (members from before it was asked at sign-up), then only the store can change it.
+    if (patch.birthDate !== undefined && String(patch.birthDate ?? '').trim() !== (m.birthDate ?? '')) {
+      if (m.birthDate) throw new ConsoleError('Your date of birth is set. Ask the store if it needs fixing.');
+      const birthDate = this.adultBirthDate(patch.birthDate);
+      m.birthDate = birthDate;
+      m.birthday = birthDate.slice(5);
     }
     if (patch.zip !== undefined) {
       const z = String(patch.zip ?? '').trim();
@@ -499,6 +536,7 @@ export class MemberApi {
         : { headline, cta: 'Join free', fine: '' },
       stores: d.stores.map((s) => ({ id: s.id, name: s.name, city: s.city, state: s.state, loyaltyLive: s.loyaltyLive })),
       defaultStoreId: d.pilot.storeId,
+      minAge: MIN_JOIN_AGE,
     };
   }
 }

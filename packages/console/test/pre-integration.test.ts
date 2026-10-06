@@ -15,7 +15,7 @@ function setup() {
   const join = async (phone: string, extra: Record<string, unknown> = {}) => {
     await api.requestCode(phone);
     const code = /^(\d{6})/.exec(texts[texts.length - 1]!)![1]!;
-    const res = api.verify(phone, code, { firstName: 'Jordan', homeStoreId: 'vgo-01', ...extra }) as { token: string };
+    const res = api.verify(phone, code, { firstName: 'Jordan', homeStoreId: 'vgo-01', birthDate: '1990-04-15', ...extra }) as { token: string };
     return api.memberFor(`Bearer ${res.token}`);
   };
   return { repo, api, join };

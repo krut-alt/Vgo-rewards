@@ -376,6 +376,7 @@ function blankForm() {
     grades: [],
     firstVisit: false,
     birthday: '',
+    adultsOnly: false,
     otherConditions: [],
     fundedBy: isAdmin() ? 'jobber' : 'store',
     scopeKind: 'stores',
@@ -441,6 +442,7 @@ function formFromRule(rule) {
     else if (c.type === 'fuelGrade') f.grades = c.grades;
     else if (c.type === 'firstVisit') f.firstVisit = true;
     else if (c.type === 'birthday') f.birthday = c.window;
+    else if (c.type === 'minAge' && c.years === 21) f.adultsOnly = true;
     else if (c.type === 'hasItem' && (e.type === 'itemDiscount' || e.type === 'basketDiscount')) {
       // "Buy X" qualifiers on item discounts are rebuilt from the discounted items.
       if (e.type === 'basketDiscount') f.otherConditions.push(c);
@@ -515,6 +517,7 @@ function ruleFromForm(f) {
   if (f.grades.length) conditions.push({ type: 'fuelGrade', grades: f.grades });
   if (f.firstVisit) conditions.push({ type: 'firstVisit' });
   if (f.birthday) conditions.push({ type: 'birthday', window: f.birthday });
+  if (f.adultsOnly) conditions.push({ type: 'minAge', years: 21 });
 
   const schedule = {};
   if (f.starts) schedule.startsAt = localMidnightIso(f.starts);
@@ -788,6 +791,13 @@ function renderOfferForm(id) {
             ),
           ),
           f.birthday && h('p', { class: 'note' }, 'Members add their birthday on the Account screen in the app. Set "Uses per member" to 1 per year so it is once a birthday.'),
+          h(
+            'label',
+            { class: 'row' },
+            h('input', { type: 'checkbox', checked: f.adultsOnly, onchange: (e) => set({ adultsOnly: e.target.checked }, true) }),
+            'Only for members 21 and over (alcohol, tobacco)',
+          ),
+          f.adultsOnly && h('p', { class: 'note' }, 'Hidden in the app from members under 21 and anyone without a date of birth on file. The cashier still checks ID at the register.'),
           f.section === 'offer' &&
             h(
               'label',
@@ -1868,6 +1878,14 @@ function addMemberDialog() {
   );
 }
 
+/** Whole years old today for a YYYY-MM-DD date of birth. */
+function ageOn(birthDate) {
+  const t = new Date();
+  const today = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+  const years = Number(today.slice(0, 4)) - Number(birthDate.slice(0, 4));
+  return today.slice(5) < birthDate.slice(5) ? years - 1 : years;
+}
+
 async function memberDialog(id) {
   const { member: m, visits } = await api('GET', `/members/${id}`);
   const adj = { delta: '', reason: '' };
@@ -1885,7 +1903,11 @@ async function memberDialog(id) {
       { class: 'note' },
       [
         m.email ? `Email ${m.email}` : 'No email on file',
-        m.birthday && `Birthday ${new Date(2024, Number(m.birthday.slice(0, 2)) - 1, Number(m.birthday.slice(3))).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}`,
+        m.birthDate
+          ? `Born ${new Date(`${m.birthDate}T12:00:00`).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })} (age ${ageOn(m.birthDate)})`
+          : m.birthday
+            ? `Birthday ${new Date(2024, Number(m.birthday.slice(0, 2)) - 1, Number(m.birthday.slice(3))).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}, no birth year`
+            : 'No date of birth',
         m.zip && `ZIP ${m.zip}`,
       ]
         .filter(Boolean)
@@ -1919,6 +1941,28 @@ async function memberDialog(id) {
         },
         'Adjust points',
       ),
+    ),
+    h(
+      'div',
+      { class: 'row' },
+      h('input', { type: 'date', 'aria-label': 'Date of birth', value: m.birthDate ?? '', style: 'height:44px', oninput: (e) => (adj.birthDate = e.target.value) }),
+      h(
+        'button',
+        {
+          class: 'btn ghost',
+          onclick: async () => {
+            try {
+              await api('PUT', `/members/${id}/birth-date`, { birthDate: adj.birthDate ?? m.birthDate });
+              toast('Date of birth saved');
+              memberDialog(id);
+            } catch (err) {
+              errors.replaceChildren(errorBox(err));
+            }
+          },
+        },
+        m.birthDate ? 'Fix date of birth' : 'Add date of birth',
+      ),
+      h('span', { class: 'note' }, 'Check their ID first. Members cannot change it in the app.'),
     ),
     errors,
     h('h2', { style: 'font-size:16px' }, 'Recent visits'),
