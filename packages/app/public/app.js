@@ -857,19 +857,18 @@ function storeCard(s, homeId, showOnMap) {
 }
 
 /**
- * Street map tiles: CARTO's Voyager map (clear streets and labels), switching to OpenStreetMap's
- * own tiles if CARTO's don't load. Both are free and need no key.
+ * Street map tiles: OpenStreetMap's own tiles, switching to Esri's street map if those don't load.
+ * Neither needs an API key.
  */
 function addBaseMap(L, map) {
-  const attribution = '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
-  const carto = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { subdomains: 'abcd', maxZoom: 19, attribution: `${attribution} © <a href="https://carto.com/attributions">CARTO</a>` });
+  const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' });
   let failed = 0;
-  carto.on('tileerror', () => {
+  osm.on('tileerror', () => {
     if (++failed !== 4) return;
-    map.removeLayer(carto);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution }).addTo(map);
+    map.removeLayer(osm);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'Tiles © <a href="https://www.esri.com">Esri</a>' }).addTo(map);
   });
-  carto.addTo(map);
+  osm.addTo(map);
 }
 
 async function findStoresNear() {
