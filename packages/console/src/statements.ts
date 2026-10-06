@@ -7,6 +7,7 @@
 // rewrite what was billed. Corporate sites get the same lines for their P&L, but nothing is billed.
 import { addDays, localParts } from './dates.js';
 import type { ConsoleData, ConsoleRule, ConsoleStore, LedgerEntry, SiteType } from './model.js';
+import { buildPdf, PAGE_H, PAGE_W, type PdfLine, type PdfPage, type PdfText } from './pdf.js';
 
 export type PeriodKind = 'day' | 'week' | 'month' | 'quarter' | 'year';
 export const PERIOD_KINDS: PeriodKind[] = ['day', 'week', 'month', 'quarter', 'year'];
@@ -332,4 +333,73 @@ export function statementCsv(st: Statement): string {
     s.pointsRedeemed,
   ]);
   return [head, ...rows].map((r) => r.map(csvCell).join(',')).join('\n') + '\n';
+}
+
+const usd = (c: number) => `${c < 0 ? '-' : ''}$${(Math.abs(c) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** One page per site: the statement a store can file or a dealer can be billed from. */
+export function statementPdf(st: Statement, data: ConsoleData, now: Date): Uint8Array {
+  const company = data.settings.legal?.companyName || data.branding.programName;
+  const L = 56;
+  const R = PAGE_W - 56;
+  const pages: PdfPage[] = st.sites.map((s) => {
+    const store = data.stores.find((x) => x.id === s.storeId);
+    const texts: PdfText[] = [];
+    const lines: PdfLine[] = [];
+    let y = PAGE_H - 64;
+    const put = (text: string, opts: Partial<PdfText> = {}) => texts.push({ x: L, y, text, ...opts });
+    put(`${data.branding.programName} statement`, { size: 18, bold: true });
+    texts.push({ x: R, y, text: st.period.label, size: 14, bold: true, align: 'right' });
+    y -= 22;
+    put(company, { grey: 0.35 });
+    texts.push({
+      x: R,
+      y,
+      text: st.closedAt ? `Closed ${localParts(st.closedAt).ymd}, as billed` : st.period.kind === 'month' ? 'Open month: preliminary' : 'Preliminary',
+      grey: 0.35,
+      align: 'right',
+    });
+    y -= 34;
+    put(s.storeName, { size: 14, bold: true });
+    y -= 16;
+    const address = [store?.address, store?.city, [store?.state, store?.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+    if (address) (put(address, { grey: 0.35 }), (y -= 14));
+    put(`${s.siteType === 'dealer' ? 'Dealer site' : s.siteType === 'corporate' ? 'Corporate site' : 'Site type not set (treated as corporate)'} · ${s.memberVisits.toLocaleString()} member visits · ${st.period.start} to ${st.period.end}`, { grey: 0.35 });
+    y -= 30;
+
+    const row = (label: string, amount: string, opts: { note?: string; bold?: boolean } = {}) => {
+      texts.push({ x: L, y, text: label, size: 11, bold: opts.bold });
+      texts.push({ x: R, y, text: amount, size: 11, bold: opts.bold, align: 'right' });
+      if (opts.note) {
+        y -= 13;
+        texts.push({ x: L, y, text: opts.note, size: 9, grey: 0.45 });
+      }
+      y -= 10;
+      lines.push({ x1: L, y1: y, x2: R, y2: y });
+      y -= 16;
+    };
+    const heading = (text: string) => {
+      texts.push({ x: L, y, text: text.toUpperCase(), size: 9, bold: true, grey: 0.4 });
+      y -= 18;
+    };
+    heading(s.billed ? 'Settlement' : 'Program cost at this site (not billed)');
+    if (s.billed) row('Network fee', usd(s.networkFeeCents), { note: 'One fee for each month the site sent transactions' });
+    row(`Points issued inside: ${s.pointsCharged.toLocaleString()} at ${st.pointChargeCents}¢ a point`, usd(s.pointsChargeCents));
+    row('Points rewards redeemed here', s.billed ? usd(-s.redemptionCreditCents) : usd(s.redemptionCreditCents), {
+      note: `${s.pointsRedeemed.toLocaleString()} points, wherever they were earned`,
+    });
+    row('Jobber-funded offers given here', s.billed ? usd(-s.offerCreditCents) : usd(s.offerCreditCents));
+    if (s.billed) row(s.netCents >= 0 ? `Amount due to ${company}` : `Credit due to ${s.storeName}`, usd(Math.abs(s.netCents)), { bold: true });
+    else row('Rewards cost, from our own margin', usd(s.rewardCostCents), { bold: true });
+    y -= 12;
+    heading('For information, not settled');
+    row('Store-funded offers', usd(s.storeFundedCents), { note: 'Given by the site at the register' });
+    row('Manufacturer offers (Skupos)', usd(s.manufacturerCents), { note: 'Paid to the store by the brand' });
+    row('Points on fuel and other jobber-funded points', s.pointsJobberFunded.toLocaleString());
+
+    texts.push({ x: L, y: 56, text: `Generated ${localParts(now).ymd}${st.sample ? ' · includes sample data' : ''}`, size: 8, grey: 0.5 });
+    texts.push({ x: R, y: 56, text: `${s.storeName} · ${st.period.label}`, size: 8, grey: 0.5, align: 'right' });
+    return { texts, lines };
+  });
+  return buildPdf(pages.length ? pages : [{ texts: [{ x: L, y: PAGE_H - 64, text: 'No sites on this statement.', size: 12 }] }], `${data.branding.programName} statement, ${st.period.label}`);
 }
