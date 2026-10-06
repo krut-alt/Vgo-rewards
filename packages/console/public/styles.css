@@ -224,3 +224,9 @@ body.signed-out .nav a, body.store-user .nav a[data-admin] { display: none; }
 .offer-name .thumb .art-frame { border-radius: 6px; }
 .offer-name .thumb .poster-logo { display: none; }
 .feat { display: inline-block; margin-left: 8px; font-size: 11px; font-weight: 700; background: #fff1a8; color: #8a0b1f; border-radius: 8px; padding: 1px 7px; vertical-align: middle; }
+
+/* Live / Offline switch on Locations */
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; background: #fff; }
+.seg-btn { border: 0; background: transparent; padding: 6px 14px; font: inherit; font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer; }
+.seg-btn.on { background: var(--draft-bg); color: var(--draft); }
+.seg-btn.on.live { background: var(--live-bg); color: var(--live); }

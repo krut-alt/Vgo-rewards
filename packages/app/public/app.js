@@ -98,6 +98,8 @@ function openSheet(...children) {
 }
 sheet.addEventListener('click', (e) => e.target === sheet && sheet.close());
 
+/** Stores members can pick: only those live on the rewards network, plus the one already chosen. */
+const pickableStores = (currentId) => config.stores.filter((s) => s.loyaltyLive || s.id === currentId);
 const fmtPhone = (p) => `${p.slice(0, 3)} ${p.slice(3, 6)} ${p.slice(6)}`;
 const storeLabel = (s) => `${s.name}${s.city ? ` · ${s.city}, ${s.state}` : ` · ${s.state}`}`;
 const money = (c) => `$${(c / 100).toFixed(2)}`;
@@ -164,7 +166,7 @@ function renderJoin() {
           h(
             'select',
             { id: 'home', onchange: (e) => (s.homeStoreId = e.target.value) },
-            config.stores.map((st) => h('option', { value: st.id, selected: st.id === s.homeStoreId }, `${storeLabel(st)}${st.loyaltyLive ? '' : ' (coming soon)'}`)),
+            pickableStores(s.homeStoreId).map((st) => h('option', { value: st.id, selected: st.id === s.homeStoreId }, `${storeLabel(st)}${st.loyaltyLive ? '' : ' (coming soon)'}`)),
           ),
         ),
         h(
@@ -178,7 +180,7 @@ function renderJoin() {
       err,
       h('div', { style: 'flex:1' }),
       h('button', { class: 'cta', onclick: sendCode }, s.mode === 'join' ? w.cta : 'Send my code'),
-      s.mode === 'join' && h('span', { class: 'fine' }, `${w.fine} By joining you agree to the `, h('a', { href: '#/terms' }, 'program terms'), ' and ', h('a', { href: '#/privacy' }, 'privacy policy'), '.'),
+      s.mode === 'join' && h('span', { class: 'fine' }, `${w.fine} Rewards are valid only at participating locations. By joining you agree to the `, h('a', { href: '#/terms' }, 'program terms'), ' and ', h('a', { href: '#/privacy' }, 'privacy policy'), '.'),
       h(
         'button',
         { class: 'switch-mode', onclick: () => ((s.mode = s.mode === 'join' ? 'signin' : 'join'), (s.error = null), renderJoin()) },
@@ -369,6 +371,22 @@ async function clip(o, on, onChange) {
   }
 }
 
+/**
+ * On an iPhone in Safari (not yet added to the home screen), how to install the app from its icon.
+ * Until the App Store version exists this is the iPhone install. Hidden once dismissed.
+ */
+function iphoneInstallCard() {
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  if (!ios || navigator.standalone || load('vgo.iosTipDone')) return null;
+  const card = h(
+    'section',
+    { class: 'card install-tip' },
+    h('div', { class: 'between' }, h('b', {}, 'Add VGO Rewards to your home screen'), h('button', { class: 'switch-mode', 'aria-label': 'Dismiss', onclick: () => (store('vgo.iosTipDone', '1'), card.remove()) }, '✕')),
+    h('span', { class: 'sub' }, 'Tap the Share button in Safari, then Add to Home Screen, then Add. The app then opens from its own icon, full screen.'),
+  );
+  return card;
+}
+
 async function renderHome() {
   me = await api('GET', '/me');
   const m = me.member;
@@ -383,6 +401,7 @@ async function renderHome() {
     h(
       'main',
       { class: 'content' },
+      iphoneInstallCard(),
       featuredSlider(me.featured ?? []),
       h(
         'section',
@@ -522,7 +541,7 @@ async function renderOffers() {
 function pickStore() {
   openSheet(
     h('b', { style: 'font-size:18px' }, 'Show offers at'),
-    config.stores.map((s) =>
+    pickableStores(offerStoreId).map((s) =>
       h(
         'button',
         {
@@ -669,7 +688,7 @@ async function renderAccount() {
           'div',
           { class: 'field' },
           h('label', { for: 'acct-store' }, 'Home store'),
-          h('select', { id: 'acct-store' }, config.stores.map((s) => h('option', { value: s.id, selected: s.id === m.homeStore.id }, `${storeLabel(s)}${s.loyaltyLive ? '' : ' (coming soon)'}`))),
+          h('select', { id: 'acct-store' }, pickableStores(m.homeStore.id).map((s) => h('option', { value: s.id, selected: s.id === m.homeStore.id }, `${storeLabel(s)}${s.loyaltyLive ? '' : ' (coming soon)'}`))),
         ),
         h(
           'div',
@@ -841,7 +860,10 @@ async function findStoresNear() {
 async function renderStores() {
   const { stores, homeStoreId } = await api('GET', '/stores');
   const placed = stores.filter((s) => s.lat !== null);
-  const sorted = here ? [...stores].sort((a, b) => (milesTo(a) ?? 1e9) - (milesTo(b) ?? 1e9)) : [...stores].sort((a, b) => Number(b.id === homeStoreId) - Number(a.id === homeStoreId));
+  const siteNo = (s) => Number(/\d+/.exec(s.name)?.[0] ?? 1e6);
+  const sorted = here
+    ? [...stores].sort((a, b) => (milesTo(a) ?? 1e9) - (milesTo(b) ?? 1e9))
+    : [...stores].sort((a, b) => Number(b.id === homeStoreId) - Number(a.id === homeStoreId) || Number(b.loyaltyLive) - Number(a.loyaltyLive) || siteNo(a) - siteNo(b));
   const mapEl = h('div', { class: 'store-map', role: 'region', 'aria-label': 'Map of stores' });
   frame(
     'stores',
@@ -849,12 +871,13 @@ async function renderStores() {
     h(
       'main',
       { class: 'content' },
-      placed.length ? mapEl : h('div', { class: 'card sub' }, 'The store map is coming soon.'),
+      mapEl,
+      h('div', { class: 'map-key' }, h('span', {}, h('i', { class: 'dot live' }), 'Rewards live'), h('span', {}, h('i', { class: 'dot soon' }), 'Coming soon')),
+      h('p', { class: 'fine' }, 'Rewards are valid only at participating locations where they are live.'),
       h('div', { class: 'between' }, h('b', {}, here ? 'Closest to you' : 'All stores'), !here && h('button', { class: 'filter', onclick: findStoresNear }, svg(ICONS.pin), ' Near me')),
       sorted.map((s) => storeCard(s, homeStoreId)),
     ),
   );
-  if (!placed.length) return;
   try {
     const L = await loadLeaflet();
     if (!mapEl.isConnected) return;
@@ -862,8 +885,8 @@ async function renderStores() {
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
     const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#c8102e';
     for (const s of placed) {
-      const pop = h('div', { class: 'map-pop' }, h('b', {}, s.name), storeLine(s) && h('div', {}, storeLine(s)), h('a', { href: directionsUrl(s), target: '_blank', rel: 'noopener' }, 'Directions'), ' · ', h('a', { href: `#store-${s.id}`, onclick: (e) => (e.preventDefault(), document.getElementById(`store-${s.id}`)?.scrollIntoView({ behavior: 'smooth' })) }, 'Details'));
-      L.circleMarker([s.lat, s.lng], { radius: s.id === homeStoreId ? 11 : 9, color: '#fff', weight: 3, fillColor: accent, fillOpacity: 1 }).addTo(map).bindPopup(pop);
+      const pop = h('div', { class: 'map-pop' }, h('b', {}, s.name), h('div', { class: s.loyaltyLive ? 'good' : 'sub' }, s.loyaltyLive ? 'Rewards live' : 'Rewards coming soon'), storeLine(s) && h('div', {}, storeLine(s)), h('a', { href: directionsUrl(s), target: '_blank', rel: 'noopener' }, 'Directions'), ' · ', h('a', { href: `#store-${s.id}`, onclick: (e) => (e.preventDefault(), document.getElementById(`store-${s.id}`)?.scrollIntoView({ behavior: 'smooth' })) }, 'Details'));
+      L.circleMarker([s.lat, s.lng], { radius: s.id === homeStoreId ? 11 : s.loyaltyLive ? 9 : 7, color: '#fff', weight: 3, fillColor: s.loyaltyLive ? accent : '#8a94a3', fillOpacity: 1 }).addTo(map).bindPopup(pop);
     }
     const points = placed.map((s) => [s.lat, s.lng]);
     if (here) {
@@ -871,7 +894,9 @@ async function renderStores() {
       const nearest = sorted.find((s) => s.lat !== null);
       if (nearest) points.splice(0, points.length, [here.lat, here.lng], [nearest.lat, nearest.lng]);
     }
-    if (points.length === 1) map.setView(points[0], 13);
+    // With no store on the map yet, show the area VGO serves (South Carolina and Fayetteville, NC).
+    if (!points.length) map.fitBounds([[32.0, -83.4], [35.3, -78.8]]);
+    else if (points.length === 1) map.setView(points[0], 13);
     else map.fitBounds(points, { padding: [30, 30], maxZoom: 13 });
   } catch (e) {
     mapEl.replaceChildren(h('div', { class: 'sub', style: 'padding:16px' }, e.message));

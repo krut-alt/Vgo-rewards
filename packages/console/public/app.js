@@ -1653,7 +1653,7 @@ function storeDialog(store, draft) {
         'In Google Maps, right-click the store and click the numbers at the top to copy them, then paste here.',
       ),
     ),
-    h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: s.loyaltyLive, onchange: (e) => (s.loyaltyLive = e.target.checked) }), 'Loyalty live at this store (POS connected and tested)'),
+    h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: s.loyaltyLive, onchange: (e) => (s.loyaltyLive = e.target.checked) }), 'Live on the rewards network (POS connected and tested). Offline stores show in the app as coming soon.'),
     h('h3', { class: 'dialog-section' }, 'In the app’s store locator'),
     h('p', { class: 'note' }, 'Members see every location on a map, with this photo, promo line and hours, plus directions in Google Maps. Stores show as a dot once they have a map location.'),
     storePhotoField(s),
@@ -1761,6 +1761,47 @@ function storePhotoField(s) {
   return box;
 }
 
+/**
+ * Live or offline on the rewards network. Live: members earn and use rewards there and can pick it
+ * as their store. Offline: it shows on the app's map as coming soon, and the POS can't credit visits.
+ */
+function liveSwitch(s) {
+  return h(
+    'div',
+    { class: 'seg', role: 'radiogroup', 'aria-label': `${s.name} on the rewards network` },
+    [
+      [true, 'Live'],
+      [false, 'Offline'],
+    ].map(([v, label]) =>
+      h(
+        'button',
+        {
+          type: 'button',
+          role: 'radio',
+          'aria-checked': s.loyaltyLive === v,
+          class: `seg-btn${s.loyaltyLive === v ? (v ? ' on live' : ' on') : ''}`,
+          onclick: async () => {
+            if (s.loyaltyLive === v) return;
+            const ask = v
+              ? `Put ${s.name} live on the rewards network? Members can pick it as their store and earn and use rewards there. Only do this once its POS link is connected and tested.`
+              : `Take ${s.name} offline? Members can no longer earn or use rewards there, and the app shows it as coming soon.`;
+            if (!confirm(ask)) return;
+            try {
+              await api('POST', `/stores/${s.id}/live`, { live: v });
+              await reload();
+              toast(`${s.name} is now ${v ? 'live' : 'offline'}`);
+              render();
+            } catch (err) {
+              toast(err.message);
+            }
+          },
+        },
+        label,
+      ),
+    ),
+  );
+}
+
 function groupDialog(group) {
   const g = group ? { ...group } : { id: '', name: '' };
   let storeIds = boot.stores.filter((s) => g.id && s.groupIds.includes(g.id)).map((s) => s.id);
@@ -1814,7 +1855,7 @@ function renderStores() {
   main.replaceChildren(
     pageHead(
       'Locations',
-      `${live} of ${boot.stores.length} locations have loyalty live. Groups let you send an offer to several stores at once.`,
+      `${live} of ${boot.stores.length} locations are live on the rewards network. Offline locations show in the app as coming soon. Groups let you send an offer to several stores at once.`,
       h('button', { class: 'btn accent', onclick: () => storeDialog(null) }, plusIcon(), 'Add location'),
     ),
     h(
@@ -1823,7 +1864,7 @@ function renderStores() {
       h(
         'table',
         { style: 'min-width: 760px' },
-        h('thead', {}, h('tr', {}, ['Site', 'Address', 'Contact', 'POS', 'Loyalty', 'Groups'].map((t) => h('th', {}, t)))),
+        h('thead', {}, h('tr', {}, ['Site', 'Address', 'Contact', 'POS', 'Rewards network', 'Groups'].map((t) => h('th', {}, t)))),
         h(
           'tbody',
           {},
@@ -1832,17 +1873,22 @@ function renderStores() {
               'tr',
               { class: 'click', tabindex: 0, onclick: () => storeDialog(s), onkeydown: (e) => e.key === 'Enter' && storeDialog(s) },
               h('td', { class: 'strong' }, s.name),
-              h('td', {}, [s.address, s.city ? `${s.city}, ${s.state}` : s.state].filter(Boolean).join(', ')),
+              h(
+                'td',
+                {},
+                [s.address, s.city ? `${s.city}, ${s.state}` : s.state].filter(Boolean).join(', '),
+                s.lat === undefined && h('div', { class: 'meta' }, s.mapLookupFailed ? 'Not found on the map: add the map location' : s.address ? 'Finding on the map…' : 'No map location'),
+              ),
               h('td', {}, s.contactName || '—'),
               h('td', {}, posLabel(s.pos)),
-              h('td', {}, h('span', { class: `badge ${s.loyaltyLive ? 'Live' : 'Draft'}` }, s.loyaltyLive ? 'Live' : 'Not enabled')),
+              h('td', { onclick: (e) => e.stopPropagation() }, liveSwitch(s)),
               h('td', {}, s.groupIds.map((g) => boot.groups.find((x) => x.id === g)?.name ?? g).join(', ')),
             ),
           ),
         ),
       ),
     ),
-    h('p', { class: 'note' }, 'Cities, the state split and POS for stores 02 to 13 are placeholders until confirmed. Click a location to update it.'),
+    h('p', { class: 'note' }, 'Click a location to update it. Map locations are looked up from the address; if one isn’t found, paste it from Google Maps.'),
     h(
       'div',
       { class: 'page-head' },

@@ -4,6 +4,7 @@ import type { Actor } from '../../engine/src/index.js';
 import { NO_EARN_CATEGORIES } from './catalog.js';
 import { addDays, localMidnight, localParts } from './dates.js';
 import type { ConsoleData, ConsoleRule, ConsoleStore } from './model.js';
+import { REAL_SITES_MIGRATION } from './migrate.js';
 import { Repo } from './repo.js';
 
 export const ADMIN: Actor = { role: 'jobber-admin', userId: 'krut' };
@@ -243,7 +244,11 @@ function addSampleActivity(repo: Repo, pilotStart: string, days: number): void {
   }
 }
 
-export function seedData(now = new Date()): ConsoleData {
+/**
+ * `realSites` swaps the 13 placeholder stores for VGO's real site list (see migrate.ts). The
+ * server always asks for it; tests keep the placeholders they were written against.
+ */
+export function seedData(now = new Date(), { realSites = false } = {}): ConsoleData {
   const today = localParts(now).ymd;
   const pilotDays = 90;
   const elapsed = 45;
@@ -270,6 +275,7 @@ export function seedData(now = new Date()): ConsoleData {
     },
     history: [],
     pilot: { storeId: 'vgo-01', startedOn: pilotStart, days: pilotDays },
+    ...(realSites ? {} : { migrations: [REAL_SITES_MIGRATION] }),
   };
   const repo = new Repo(data, () => {}, () => now);
   addSampleActivity(repo, pilotStart, elapsed);

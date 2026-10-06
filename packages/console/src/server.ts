@@ -26,6 +26,7 @@ import { PosLink } from './pos/link.js';
 import { PRESETS } from './presets.js';
 import { ConsoleError, Repo, withoutNulls, type RuleInput } from './repo.js';
 import { spotFrom } from './geo.js';
+import { storeSpotFiller, type Geocoder } from './geocode.js';
 import { mediaUrl, memoryMediaStore, readUpload, type MediaStore } from './media.js';
 import { parseItemsCsv, searchItems } from './items.js';
 import { computeResults } from './results.js';
@@ -107,6 +108,8 @@ export interface AppOptions {
   posLinkAdapter?: string;
   /** Where reward artwork is kept. Defaults to memory (tests and local tries). */
   media?: MediaStore;
+  /** Finds map spots for stores from their addresses. Off in tests. */
+  geocoder?: Geocoder;
 }
 
 const COOKIE = 'vgo_portal';
@@ -140,6 +143,8 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
   const clock = opts.clock ?? (() => new Date());
   const members = opts.memberApi ?? new MemberApi(repo, undefined, clock);
   const media = opts.media ?? memoryMediaStore();
+  const fillSpots = opts.geocoder ? storeSpotFiller(repo, opts.geocoder) : undefined;
+  void fillSpots?.();
   // Recently shown artwork, so the app doesn't fetch the same image from storage on every view.
   const mediaCache = new Map<string, Buffer>();
   const portal = opts.adminPassword ? new PortalAuthService(repo, opts.adminPassword, clock) : undefined;
@@ -229,11 +234,19 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
     if (method === 'GET' && path === '/stores') return [200, { stores: myStores(), groups: isAdmin ? repo.data.groups : [] }];
     if (method === 'PUT' && (match = m(/^\/stores\/([\w-]+)$/))) {
       const store = await body<ConsoleStore>(req);
-      return [200, repo.upsertStore({ ...withoutNulls(store), id: match[1]! } as ConsoleStore, actor)];
+      const saved = repo.upsertStore({ ...withoutNulls(store), id: match[1]! } as ConsoleStore, actor);
+      void fillSpots?.();
+      return [200, saved];
+    }
+    if (method === 'POST' && (match = m(/^\/stores\/([\w-]+)\/live$/))) {
+      const { live } = await body<{ live?: unknown }>(req);
+      return [200, repo.setStoreLive(match[1]!, Boolean(live), actor)];
     }
     if (method === 'POST' && path === '/stores') {
       const store = await body<ConsoleStore>(req);
-      return [201, repo.upsertStore({ ...withoutNulls(store), id: '' } as ConsoleStore, actor)];
+      const saved = repo.upsertStore({ ...withoutNulls(store), id: '' } as ConsoleStore, actor);
+      void fillSpots?.();
+      return [201, saved];
     }
     if (method === 'POST' && path === '/groups') {
       const { id, name, storeIds } = await body<{ id?: string; name: string; storeIds?: string[] }>(req);
