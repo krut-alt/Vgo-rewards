@@ -34,7 +34,7 @@ import { addItemUpload, ALL_STORES, catalogFor, clearStoreItems, everyItem, pars
 import { computeResults } from './results.js';
 import { ADMIN } from './seed.js';
 import { SkuposSync, type SkuposFeed } from './skupos.js';
-import { closeMonths, PERIOD_KINDS, recloseMonth, statementCsv, statementFor, type PeriodKind } from './statements.js';
+import { closeMonths, PERIOD_KINDS, recloseMonth, statementCsv, statementFor, statementPdf, type PeriodKind } from './statements.js';
 import { STOCK_ART, pickStockArt, stockArtFor, stockArtUrl } from './stock-art.js';
 
 const TYPES: Record<string, string> = {
@@ -352,15 +352,20 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
       return [200, computeResults(repo.data, mine ? 'all' : view, clock(), mine)];
     }
     // Site statements: any period; months close and freeze on their own. Store users see only their sites.
-    if (method === 'GET' && (path === '/statements' || path === '/statements/csv')) {
+    if (method === 'GET' && (path === '/statements' || path === '/statements/csv' || path === '/statements/pdf')) {
       const kind = (url.searchParams.get('period') ?? 'month') as PeriodKind;
       if (!PERIOD_KINDS.includes(kind)) throw new ConsoleError('Pick day, week, month, quarter or year.');
       const date = url.searchParams.get('date') || localParts(clock()).ymd;
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new ConsoleError('Dates look like 2026-10-01.');
-      const st = statementFor(repo.data, kind, date, mine);
+      // Downloads can be for one site; a store user can only ask for their own.
+      const one = url.searchParams.get('store');
+      if (one && !myStores().some((s) => s.id === one)) throw new ConsoleError('Location not found.', 404);
+      const st = statementFor(repo.data, kind, date, one ? [one] : mine);
       if (path === '/statements') return [200, st];
-      const fileName = `vgo-statements-${kind}-${st.period.start}.csv`;
-      return [200, { fileName, csv: statementCsv(st) }];
+      const site = one ? `-${one}` : '';
+      if (path === '/statements/csv') return [200, { fileName: `vgo-statement-${kind}-${st.period.start}${site}.csv`, csv: statementCsv(st) }];
+      const pdf = Buffer.from(statementPdf(st, repo.data, clock()));
+      return [200, { fileName: `vgo-statement-${kind}-${st.period.start}${site}.pdf`, pdfBase64: pdf.toString('base64') }];
     }
     if (method === 'POST' && (match = m(/^\/statements\/(\d{4}-\d{2})\/reclose$/))) {
       adminOnly();

@@ -2456,6 +2456,26 @@ async function renderResults() {
 let stmtPeriod = 'month';
 let stmtDate = null; // a store-local YYYY-MM-DD inside the period shown; null is today
 
+/** Saves a statement as PDF or CSV; `storeId` limits it to one site. */
+async function downloadStatement(kind, sm, storeId) {
+  const q = `period=${sm.period.kind}&date=${sm.period.start}${storeId ? `&store=${encodeURIComponent(storeId)}` : ''}`;
+  try {
+    if (kind === 'csv') {
+      const { fileName, csv } = await api('GET', `/statements/csv?${q}`);
+      return downloadText(fileName, csv);
+    }
+    const { fileName, pdfBase64 } = await api('GET', `/statements/pdf?${q}`);
+    const bytes = Uint8Array.from(atob(pdfBase64), (c) => c.charCodeAt(0));
+    const a = h('a', { href: URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })), download: fileName });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
 const signedMoney = (cents) => (cents < 0 ? `−${money(-cents)}` : money(cents));
 const siteTypeLabel = (t) => (t === 'dealer' ? 'Dealer' : t === 'corporate' ? 'Corporate' : 'Not set');
 /** Net from the site's side: what it owes us, or what we owe it. */
@@ -2494,7 +2514,14 @@ function statementDialog(st, sm) {
         line('Points on fuel and other jobber-funded points', st.pointsJobberFunded.toLocaleString()),
       ),
     ),
-    h('div', { class: 'row' }, h('div', { class: 'grow' }), h('button', { class: 'btn', onclick: closeDialog }, 'Close')),
+    h(
+      'div',
+      { class: 'row' },
+      h('button', { class: 'btn ghost', onclick: () => downloadStatement('pdf', sm, st.storeId) }, 'Download PDF'),
+      h('button', { class: 'btn ghost', onclick: () => downloadStatement('csv', sm, st.storeId) }, 'Download CSV'),
+      h('div', { class: 'grow' }),
+      h('button', { class: 'btn', onclick: closeDialog }, 'Close'),
+    ),
   );
 }
 
@@ -2559,15 +2586,10 @@ async function renderStatements() {
         h('span', { class: 'lede' }, isAdmin() ? 'What each site owes or is owed for the rewards program. Months close on their own on the 2nd and stay as billed.' : 'What your sites owe or are owed for the rewards program. Months close on the 2nd.'),
       ),
       h(
-        'button',
-        {
-          class: 'btn ghost',
-          onclick: async () => {
-            const { fileName, csv } = await api('GET', `/statements/csv?period=${stmtPeriod}&date=${date}`);
-            downloadText(fileName, csv);
-          },
-        },
-        'Download CSV',
+        'div',
+        { class: 'row' },
+        h('button', { class: 'btn ghost', onclick: () => downloadStatement('pdf', sm) }, isAdmin() ? 'PDF, every site' : 'Download PDF'),
+        h('button', { class: 'btn ghost', onclick: () => downloadStatement('csv', sm) }, 'Download CSV'),
       ),
     ),
     h(
