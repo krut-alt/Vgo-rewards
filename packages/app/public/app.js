@@ -784,14 +784,15 @@ async function renderAccount() {
 
 // ---------- stores ----------
 
-const LEAFLET = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet';
+// Leaflet 1.9.4 ships with the app (vendor/leaflet), so the map doesn't depend on a CDN.
+const LEAFLET = '/app/vendor/leaflet/leaflet';
 let leafletLoading = null;
 /** The map library loads only when someone opens Stores. */
 function loadLeaflet() {
   if (window.L) return Promise.resolve(window.L);
   leafletLoading ??= new Promise((resolve, reject) => {
-    document.head.append(h('link', { rel: 'stylesheet', href: `${LEAFLET}.css`, integrity: 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=', crossorigin: '' }));
-    const s = h('script', { src: `${LEAFLET}.js`, integrity: 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=', crossorigin: '' });
+    document.head.append(h('link', { rel: 'stylesheet', href: `${LEAFLET}.css` }));
+    const s = h('script', { src: `${LEAFLET}.js` });
     s.onload = () => resolve(window.L);
     s.onerror = () => ((leafletLoading = null), reject(new Error('The map didn’t load. Check your connection.')));
     document.head.append(s);
@@ -848,6 +849,22 @@ function storeCard(s, homeId) {
   );
 }
 
+/**
+ * Street map tiles: CARTO's Voyager map (clear streets and labels), switching to OpenStreetMap's
+ * own tiles if CARTO's don't load. Both are free and need no key.
+ */
+function addBaseMap(L, map) {
+  const attribution = '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+  const carto = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { subdomains: 'abcd', maxZoom: 19, attribution: `${attribution} © <a href="https://carto.com/attributions">CARTO</a>` });
+  let failed = 0;
+  carto.on('tileerror', () => {
+    if (++failed !== 4) return;
+    map.removeLayer(carto);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution }).addTo(map);
+  });
+  carto.addTo(map);
+}
+
 async function findStoresNear() {
   try {
     here = await locate();
@@ -882,9 +899,11 @@ async function renderStores() {
     const L = await loadLeaflet();
     if (!mapEl.isConnected) return;
     const map = L.map(mapEl, { scrollWheelZoom: false, attributionControl: true });
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+    addBaseMap(L, map);
     const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#c8102e';
-    for (const s of placed) {
+    // Live stores and the member's own store go on top, so coming-soon dots never hide them.
+    const rank = (s) => (s.id === homeStoreId ? 2 : s.loyaltyLive ? 1 : 0);
+    for (const s of [...placed].sort((a, b) => rank(a) - rank(b))) {
       const pop = h('div', { class: 'map-pop' }, h('b', {}, s.name), h('div', { class: s.loyaltyLive ? 'good' : 'sub' }, s.loyaltyLive ? 'Rewards live' : 'Rewards coming soon'), storeLine(s) && h('div', {}, storeLine(s)), h('a', { href: directionsUrl(s), target: '_blank', rel: 'noopener' }, 'Directions'), ' · ', h('a', { href: `#store-${s.id}`, onclick: (e) => (e.preventDefault(), document.getElementById(`store-${s.id}`)?.scrollIntoView({ behavior: 'smooth' })) }, 'Details'));
       L.circleMarker([s.lat, s.lng], { radius: s.id === homeStoreId ? 11 : s.loyaltyLive ? 9 : 7, color: '#fff', weight: 3, fillColor: s.loyaltyLive ? accent : '#8a94a3', fillOpacity: 1 }).addTo(map).bindPopup(pop);
     }
