@@ -321,7 +321,7 @@ function renderOffers() {
                   h(
                     'td',
                     { class: 'strong' },
-                    h('div', { class: 'offer-name' }, h('div', { class: 'thumb' }, artFrame({ imageUrl: r.display.imageUrl, stockArtUrl: r.display.stockArt?.url, headline: r.display.headline, kind: r.display.artKind })), h('span', {}, r.name, r.featured && h('span', { class: 'feat' }, 'Featured'))),
+                    h('div', { class: 'offer-name' }, h('div', { class: 'thumb' }, artFrame({ imageUrl: r.display.imageUrl, stockArtUrl: r.display.stockArt?.url, headline: r.display.headline, kind: r.display.artKind })), h('span', {}, r.name, r.featured && h('span', { class: 'feat' }, 'Featured'), r.skupos && h('span', { class: 'feat skupos' }, 'Skupos'))),
                   ),
                   h('td', {}, r.display.type),
                   h('td', {}, r.display.target),
@@ -744,6 +744,13 @@ function renderOfferForm(id) {
   main.replaceChildren(
     h('a', { href: backHref }, f.section === 'offer' ? 'Back to offers' : 'Back to reward rules'),
     pageHead(existing ? existing.name : f._fromDraft ? 'Adjust drafted rule' : 'New offer', existing ? `${existing.display.type} · ${existing.display.status}` : ''),
+    existing?.skupos &&
+      h(
+        'div',
+        { class: 'notice' },
+        'This offer comes from Skupos and updates itself every day. Artwork, the headline and Featured stay as you set them; the discount, dates and stores follow Skupos. Pause it to keep it out of the app. ',
+        h('a', { href: '#/skupos' }, 'See Skupos promotions'),
+      ),
     h(
       'div',
       { class: 'create' },
@@ -1611,7 +1618,7 @@ function storeDialog(store, draft) {
     ? draft
     : store
     ? structuredClone(store)
-    : { id: '', name: '', address: '', city: '', state: 'SC', zip: '', contactName: '', email: '', phone: '', groupIds: [], pos: 'verifone-commander', posSiteId: '', loyaltyLive: false, mappedCategories: [] };
+    : { id: '', name: '', address: '', city: '', state: 'SC', zip: '', contactName: '', email: '', phone: '', groupIds: [], pos: 'verifone-commander', posSiteId: '', loyaltyLive: false, skuposEnrolled: false, skuposStoreId: '', mappedCategories: [] };
   const errors = h('div', {});
   const field = (label, input, hint) => h('label', { class: 'field' }, h('span', {}, label), input, hint ? h('span', { class: 'hint' }, hint) : null);
   const text = (key, attrs = {}) => h('input', { value: s[key] ?? '', oninput: (e) => (s[key] = e.target.value), ...attrs });
@@ -1662,6 +1669,14 @@ function storeDialog(store, draft) {
       ),
     ),
     h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: s.loyaltyLive, onchange: (e) => (s.loyaltyLive = e.target.checked) }), 'Live on the rewards network (POS connected and tested). Offline stores show in the app as coming soon.'),
+    h('h3', { class: 'dialog-section' }, 'Skupos'),
+    h(
+      'label',
+      { class: 'row' },
+      h('input', { type: 'checkbox', checked: Boolean(s.skuposEnrolled), onchange: (e) => (s.skuposEnrolled = e.target.checked) }),
+      'This site is enrolled in Skupos. Its Skupos brand promotions show up in the app automatically, updated daily, while the site is live.',
+    ),
+    h('div', { class: 'grid2' }, field('Skupos store ID (optional)', text('skuposStoreId', { placeholder: 'From the Skupos dashboard' }), 'Only needed when a promotion runs at some Skupos stores and not others.')),
     h('h3', { class: 'dialog-section' }, 'In the app’s store locator'),
     h('p', { class: 'note' }, 'Members see every location on a map, with this photo, promo line and hours, plus directions in Google Maps. Stores show as a dot once they have a map location.'),
     storePhotoField(s),
@@ -1740,7 +1755,7 @@ function storeDialog(store, draft) {
                 throw Object.assign(new Error(msg), { problems: [msg] });
               }
               delete body.fuelPrices;
-              for (const k of ['address', 'zip', 'contactName', 'email', 'phone', 'posSiteId', 'tagline', 'hours', 'photoMediaId']) if (!String(body[k] ?? '').trim()) body[k] = null;
+              for (const k of ['address', 'zip', 'contactName', 'email', 'phone', 'posSiteId', 'skuposStoreId', 'tagline', 'hours', 'photoMediaId']) if (!String(body[k] ?? '').trim()) body[k] = null;
               if (body.mapSpot !== undefined) {
                 const nums = body.mapSpot.match(/-?\d+(?:\.\d+)?/g) ?? [];
                 if (!body.mapSpot.trim()) (body.lat = null), (body.lng = null);
@@ -1905,8 +1920,8 @@ function renderStores() {
       { class: 'card table-wrap' },
       h(
         'table',
-        { style: 'min-width: 760px' },
-        h('thead', {}, h('tr', {}, ['Site', 'Address', 'Contact', 'POS', 'Rewards network', 'Groups'].map((t) => h('th', {}, t)))),
+        { style: 'min-width: 840px' },
+        h('thead', {}, h('tr', {}, ['Site', 'Address', 'Contact', 'POS', 'Rewards network', 'Skupos', 'Groups'].map((t) => h('th', {}, t)))),
         h(
           'tbody',
           {},
@@ -1924,6 +1939,7 @@ function renderStores() {
               h('td', {}, s.contactName || '—'),
               h('td', {}, posLabel(s.pos)),
               h('td', { onclick: (e) => e.stopPropagation() }, liveSwitch(s)),
+              h('td', {}, s.skuposEnrolled ? 'Enrolled' : '—'),
               h('td', {}, s.groupIds.map((g) => boot.groups.find((x) => x.id === g)?.name ?? g).join(', ')),
             ),
           ),
@@ -2908,6 +2924,157 @@ async function renderItems() {
   );
 }
 
+// ---------- Skupos promotions ----------
+
+const SKUPOS_SAMPLE = [
+  'Promotion ID,Brand,Offer,UPCs,Category,Discount,Limit,Start date,End date,21+,Stores',
+  'ENG-1042,Marlboro,$1.00 off 2 packs,028200003577;028200003843,Tobacco,1.00,2,10/1/2026,10/31/2026,Yes,',
+  'ENG-1077,Red Bull,50¢ off any 16 oz,611269991000,Energy drinks,0.50,1,10/6/2026,11/2/2026,No,VGO #31',
+].join('\n');
+
+function downloadText(fileName, text) {
+  const a = h('a', { href: URL.createObjectURL(new Blob([text], { type: 'text/csv' })), download: fileName });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function skuposRunLine(run) {
+  const names = (label, xs) => xs.length > 0 && h('div', {}, h('b', {}, `${label}: `), xs.join(', '));
+  const quiet = !run.created.length && !run.updated.length && !run.ended.length;
+  return h(
+    'div',
+    {},
+    run.error && h('div', { class: 'meta', style: 'color: var(--warn)' }, run.error),
+    names('New', run.created),
+    names('Updated', run.updated),
+    names('Ended', run.ended),
+    quiet && h('div', { class: 'meta' }, 'No changes'),
+    run.skipped.length > 0 && h('details', {}, h('summary', { class: 'meta' }, `${run.skipped.length} not added`), run.skipped.map((x) => h('div', { class: 'meta' }, `${x.promo}: ${x.reason}`))),
+  );
+}
+
+async function renderSkupos() {
+  const r = await api('GET', '/skupos');
+  const file = h('input', { type: 'file', accept: '.csv,.txt,text/csv', hidden: true });
+  const status = h('div', {});
+  const done = async (res, what) => {
+    const n = res.run.created.length;
+    toast(`${what}: ${n} new, ${res.run.updated.length} updated, ${res.run.ended.length} ended`);
+    await reload();
+    await renderSkupos();
+  };
+  file.onchange = async () => {
+    const f = file.files?.[0];
+    file.value = '';
+    if (!f) return;
+    status.replaceChildren(h('p', { class: 'note' }, 'Uploading…'));
+    try {
+      await done(await api('POST', '/skupos/upload', { csv: await f.text(), fileName: f.name }), 'Promotions uploaded');
+    } catch (err) {
+      status.replaceChildren(errorBox(err));
+    }
+  };
+  const runNow = async (e) => {
+    e.target.disabled = true;
+    try {
+      await done(await api('POST', '/skupos/run'), 'Updated');
+    } catch (err) {
+      e.target.disabled = false;
+      status.replaceChildren(errorBox(err));
+    }
+  };
+  const enrolled = r.enrolledStores;
+  const liveEnrolled = enrolled.filter((s) => s.live);
+  const source = r.promosFrom
+    ? r.promosFrom.source === 'feed'
+      ? `Read from the Skupos feed ${new Date(r.promosFrom.at).toLocaleString()}.`
+      : `From ${r.promosFrom.fileName ?? 'the list'} uploaded ${new Date(r.promosFrom.at).toLocaleString()}.`
+    : 'No promotions list yet.';
+  const fmtDay = (ymd) => new Date(`${ymd}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const off = (p) => (p.percentOff !== undefined ? `${p.percentOff}% off` : `${money(p.centsOff)} off`) + (p.maxQty > 1 ? `, up to ${p.maxQty}` : '');
+  main.replaceChildren(
+    pageHead(
+      'Skupos promotions',
+      'Brand promotions from Skupos go into the app on their own at every location that is enrolled in Skupos and live on the rewards network. They are tagged as Skupos promos, need 21+ for tobacco and alcohol, and come off when they end.',
+      h('div', { class: 'row' }, h('button', { class: 'btn ghost', onclick: runNow }, 'Update now'), h('button', { class: 'btn accent', onclick: () => file.click() }, 'Upload promotions list'), file),
+    ),
+    status,
+    h(
+      'div',
+      { class: 'notice' },
+      r.feedConnected
+        ? 'Connected to the Skupos feed. The list is read and the app updated once a day.'
+        : 'No automatic Skupos feed is connected yet, so the app uses the last list uploaded here. It is still checked every day, so promotions start and end on time. ',
+      !r.feedConnected && h('button', { class: 'link', onclick: () => downloadText('skupos-promotions-sample.csv', SKUPOS_SAMPLE) }, 'Download a sample file'),
+    ),
+    h(
+      'p',
+      { class: 'note' },
+      `${source} ${r.lastDailyOn ? `Last daily update: ${fmtDay(r.lastDailyOn)}.` : ''} `,
+      enrolled.length
+        ? `Enrolled locations: ${enrolled.map((s) => `${s.name}${s.live ? '' : ' (offline)'}`).join(', ')}.`
+        : 'No location is enrolled yet. Tick "enrolled in Skupos" on a location to start.',
+      liveEnrolled.length < enrolled.length ? ' Offline locations get the promotions once they go live.' : '',
+    ),
+    h('h2', {}, 'Promotions'),
+    h(
+      'div',
+      { class: 'card table-wrap' },
+      h(
+        'table',
+        { style: 'min-width: 760px' },
+        h('thead', {}, h('tr', {}, ['Promotion', 'Discount', 'Runs', 'Age', 'Stores', 'In the app'].map((t) => h('th', {}, t)))),
+        h(
+          'tbody',
+          {},
+          r.promos.length
+            ? r.promos.map((p) =>
+                h(
+                  'tr',
+                  p.ruleId ? { class: 'click', tabindex: 0, onclick: () => (location.hash = `#/offers/${p.ruleId}`), onkeydown: (e) => e.key === 'Enter' && (location.hash = `#/offers/${p.ruleId}`) } : {},
+                  h('td', { class: 'strong' }, p.brand ? `${p.brand}: ${p.title}` : p.title, h('div', { class: 'meta' }, p.upcs.length ? `${p.upcs.length} UPC${p.upcs.length === 1 ? '' : 's'}` : p.category ?? '')),
+                  h('td', {}, off(p)),
+                  h('td', {}, `${fmtDay(p.startsOn)} – ${fmtDay(p.endsOn)}`),
+                  h('td', {}, p.ageRestricted ? '21+' : '18+'),
+                  h('td', {}, p.storeNames.length ? p.storeNames.join(', ') : '—'),
+                  h('td', {}, h('span', { class: `badge ${p.state === 'Not in the app' ? 'Draft' : p.state}` }, p.state)),
+                ),
+              )
+            : h('tr', {}, h('td', { colspan: 6, class: 'note' }, 'No Skupos promotions yet.')),
+        ),
+      ),
+    ),
+    h('h2', {}, 'Daily log'),
+    h(
+      'div',
+      { class: 'card table-wrap' },
+      h(
+        'table',
+        { style: 'min-width: 640px' },
+        h('thead', {}, h('tr', {}, ['When', 'What ran', 'Changes', 'Live in the app after'].map((t) => h('th', {}, t)))),
+        h(
+          'tbody',
+          {},
+          r.runs.length
+            ? r.runs.map((run) =>
+                h(
+                  'tr',
+                  {},
+                  h('td', {}, new Date(run.at).toLocaleString()),
+                  h('td', {}, { feed: 'Daily update (feed)', daily: 'Daily update', upload: 'List uploaded', stores: 'Locations changed', manual: 'Update now' }[run.source] ?? run.source),
+                  h('td', {}, skuposRunLine(run)),
+                  h('td', {}, run.active.length ? run.active.map((a) => h('div', {}, a.name, h('span', { class: 'meta' }, ` · ${a.stores.length} store${a.stores.length === 1 ? '' : 's'}${a.endsOn ? ` · ends ${fmtDay(a.endsOn)}` : ''}`))) : h('span', { class: 'meta' }, 'None')),
+                ),
+              )
+            : h('tr', {}, h('td', { colspan: 4, class: 'note' }, 'The first update runs today.')),
+        ),
+      ),
+    ),
+  );
+}
+
 // ---------- router ----------
 
 async function render() {
@@ -2929,6 +3096,7 @@ async function render() {
     if (section === 'results') return await renderResults();
     if (section === 'users' && isAdmin()) return await renderUsers();
     if (section === 'items' && isAdmin()) return await renderItems();
+    if (section === 'skupos' && isAdmin()) return await renderSkupos();
     return renderOffers();
   } catch (err) {
     if (!err.signIn) main.replaceChildren(errorBox(err));

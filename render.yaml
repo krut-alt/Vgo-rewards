@@ -33,3 +33,9 @@ services:
       # Which link vendor's message format /api/pos/link speaks. Leave empty for our own ("vgo").
       - key: VGO_POS_LINK
         sync: false
+      # Where the daily Skupos update reads the current promotions, once Skupos/PDI give us a feed link.
+      # Leave empty to use the list uploaded on the portal's Skupos page.
+      - key: SKUPOS_FEED_URL
+        sync: false
+      - key: SKUPOS_FEED_TOKEN
+        sync: false
