@@ -19,6 +19,8 @@ export interface ConsoleRule extends Rule {
   geofence?: { radiusMiles: number };
   /** Artwork shown on the reward in the app (an uploaded flyer or picture, stored at 1200×675). */
   artwork?: { mediaId: string };
+  /** Built-in picture when there is no artwork: a picture id from the stock catalog, 'none' for a plain banner, or empty to pick by keywords. */
+  stockArt?: string;
   /** Big promo text on the app card when there is no artwork, e.g. "25¢ OFF". Made from the reward when empty. */
   headline?: string;
   /** Shown in the big slider at the top of the app's home screen. */

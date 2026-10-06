@@ -1,3 +1,4 @@
+import { isStockArtId } from './stock-art.js';
 // Runtime checks for rules arriving from the console or API, so a bad rule never reaches a POS.
 import type { Condition, Effect, Scope } from '../../engine/src/index.js';
 import type { ConsoleRule } from './model.js';
@@ -116,6 +117,7 @@ export function ruleProblems(rule: Partial<ConsoleRule>, storeIds: string[], gro
   if (rule.requiresClip !== undefined && typeof rule.requiresClip !== 'boolean') p.push('Add-to-card setting is not valid.');
   if (rule.headline !== undefined && (typeof rule.headline !== 'string' || rule.headline.length > 28)) p.push('Keep the promo headline to 28 characters.');
   if (rule.artwork !== undefined && (!rule.artwork || typeof rule.artwork.mediaId !== 'string')) p.push('Artwork is not valid.');
+  if (rule.stockArt !== undefined && rule.stockArt !== 'none' && !isStockArtId(rule.stockArt)) p.push('That stock picture is not in the catalog.');
   if (rule.featured !== undefined && typeof rule.featured !== 'boolean') p.push('Featured setting is not valid.');
   const g = rule.geofence;
   if (g !== undefined) {

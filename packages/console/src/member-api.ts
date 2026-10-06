@@ -1,5 +1,6 @@
 // What the customer app needs: phone sign-in, the member's home screen, offers, add-to-card and
 // picking a points reward for the next visit. Members only ever see their own data.
+import { stockArtFor, stockArtUrl } from './stock-art.js';
 import { createHash, randomBytes, randomInt } from 'node:crypto';
 import { conditionPasses, inSchedule, inScope, type Actor, type Rule, type Transaction } from '../../engine/src/index.js';
 import { localParts } from './dates.js';
@@ -36,6 +37,8 @@ export interface AppOffer {
   nearby?: boolean;
   /** Uploaded artwork, always 16:9. Cards without it show `headline` on a colored panel. */
   imageUrl?: string;
+  /** Built-in picture shown on the banner when there is no uploaded artwork. */
+  stockArtUrl?: string;
   headline: string;
   featured: boolean;
 }
@@ -48,6 +51,8 @@ export interface RedeemOption {
   costPoints: number;
   affordable: boolean;
   imageUrl?: string;
+  /** Built-in picture shown on the banner when there is no uploaded artwork. */
+  stockArtUrl?: string;
   headline: string;
   selected: boolean;
 }
@@ -228,6 +233,12 @@ export class MemberApi {
     return r.conditions.every((c) => (c.type === 'firstVisit' || c.type === 'memberTag' || c.type === 'birthday' ? conditionPasses(c, emptyTx, m) : true));
   }
 
+  private artFields(r: ConsoleRule): { imageUrl?: string; stockArtUrl?: string } {
+    if (r.artwork) return { imageUrl: mediaUrl(r.artwork.mediaId) };
+    const stock = stockArtFor(r, this.repo.data.items);
+    return stock ? { stockArtUrl: stockArtUrl(stock.id) } : {};
+  }
+
   private offerView(r: ConsoleRule, m: ConsoleMember): AppOffer {
     const { stores, groups } = this.repo.data;
     const e = r.effect;
@@ -245,7 +256,7 @@ export class MemberApi {
       ends: r.schedule?.endsAt ? shortDate(lastDay(r.schedule.endsAt)) : undefined,
       how: r.requiresClip ? 'clip' : e.type === 'punchCard' ? 'punch' : e.type === 'fuelDiscount' ? 'auto-pump' : 'auto-register',
       clipped: m.clippedRuleIds?.includes(r.id) ?? false,
-      ...(r.artwork ? { imageUrl: mediaUrl(r.artwork.mediaId) } : {}),
+      ...this.artFields(r),
       headline: promoHeadline(r),
       featured: Boolean(r.featured),
     };
@@ -291,7 +302,7 @@ export class MemberApi {
                 : `Uses ${costPoints} of your ${m.pointsBalance} points`,
             costPoints,
             affordable: costPoints <= m.pointsBalance,
-            ...(r.artwork ? { imageUrl: mediaUrl(r.artwork.mediaId) } : {}),
+            ...this.artFields(r),
             headline: promoHeadline(r),
             selected: m.nextVisitRedeem?.includes(r.id) ?? false,
           },

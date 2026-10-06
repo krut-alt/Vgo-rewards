@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600"><ellipse cx="300" cy="560" rx="190" ry="22" fill="#000" opacity=".18"/>
+<g transform="rotate(-20 300 320)">
+<rect x="120" y="230" width="360" height="150" rx="16" fill="#5a3218"/>
+<g fill="#6e3f22"><rect x="135" y="245" width="70" height="55" rx="8"/><rect x="215" y="245" width="70" height="55" rx="8"/><rect x="135" y="310" width="70" height="55" rx="8"/><rect x="215" y="310" width="70" height="55" rx="8"/></g>
+<path d="M290 220 h200 v170 h-200 l20 -28 l-20 -28 l20 -28 l-20 -28 l20 -28 l-20 -30z" fill="#6b2bd1"/>
+<rect x="330" y="275" width="140" height="60" rx="30" fill="#ffd23f"/>
+<text x="400" y="315" font-family="Arial Black,Arial,sans-serif" font-weight="900" font-size="30" fill="#6b2bd1" text-anchor="middle">CHOCO</text>
+</g>
+</svg>
