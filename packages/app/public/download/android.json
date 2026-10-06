@@ -1,7 +1,7 @@
 {
-  "version": "0.1.2",
-  "builtAt": "2026-10-06T00:57:03.825Z",
+  "version": "0.1.4",
+  "builtAt": "2026-10-06T01:01:59.081Z",
   "sizeMB": 3.5,
   "serverUrl": "https://vgo-rewards.onrender.com/app/",
-  "commit": "1310536"
+  "commit": "9c8327f"
 }
