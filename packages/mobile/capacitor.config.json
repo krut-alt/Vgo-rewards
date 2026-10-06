@@ -1,0 +1,12 @@
+{
+  "appId": "com.vgorewards.app",
+  "appName": "VGO Rewards",
+  "webDir": "www",
+  "server": {
+    "url": "https://vgo-rewards.onrender.com/app/",
+    "errorPath": "offline.html"
+  },
+  "android": {
+    "backgroundColor": "#0F2747"
+  }
+}

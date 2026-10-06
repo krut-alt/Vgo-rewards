@@ -37,6 +37,8 @@ const TYPES: Record<string, string> = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.webmanifest': 'application/manifest+json',
+  '.json': 'application/json; charset=utf-8',
+  '.apk': 'application/vnd.android.package-archive',
 };
 
 export function ruleView(repo: Repo, rule: ConsoleRule, now = new Date()) {
@@ -403,7 +405,7 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
   }
 
   async function serveFile(res: ServerResponse, dir: string, rel: string): Promise<boolean> {
-    const file = normalize(join(dir, rel === '' || rel === '/' ? 'index.html' : rel));
+    const file = normalize(join(dir, rel === '' || rel.endsWith('/') ? `${rel}index.html` : rel));
     if (!file.startsWith(dir)) return false;
     const content = await readFile(file).catch(() => null);
     if (!content) return false;
@@ -465,8 +467,9 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
         res.writeHead(200, { 'content-type': info.type, 'cache-control': 'public, max-age=31536000, immutable', 'content-length': bytes.length });
         return res.end(bytes);
       }
-      if (url.pathname === '/app') {
-        res.writeHead(302, { location: '/app/' });
+      if (url.pathname === '/app' || url.pathname === '/download' || url.pathname === '/app/download') {
+        // The phone app download page lives with the member app.
+        res.writeHead(302, { location: url.pathname === '/app' ? '/app/' : '/app/download/' });
         return res.end();
       }
       if (appRoot && url.pathname.startsWith('/app/')) {

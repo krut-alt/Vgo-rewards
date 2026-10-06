@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">VGO Rewards</string>
+    <string name="title_activity_main">VGO Rewards</string>
+    <string name="package_name">com.vgorewards.app</string>
+    <string name="custom_url_scheme">com.vgorewards.app</string>
+</resources>
