@@ -1,4 +1,4 @@
-// VGO Rewards member app: sign up, home, offers, use rewards, account.
+// VGO Rewards member app: sign up, home, offers, use rewards, stores, account and history.
 // Plain browser JavaScript; installable from the browser until the store apps exist.
 import { code128Svg } from './barcode.js';
 import { legalPage } from './legal.js';
@@ -76,6 +76,7 @@ const ICONS = {
   home: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>',
   offers: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>',
   use: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/></svg>',
+  stores: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>',
   account: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>',
   pump: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16"/><path d="M3 21h12"/><path d="M4 10h10"/><path d="M14 8h2a2 2 0 0 1 2 2v6a1.5 1.5 0 0 0 3 0V9l-3-3"/></svg>',
   pin: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>',
@@ -262,7 +263,7 @@ async function verifyCode(code) {
 
 function tabs(active) {
   const tab = (id, label) => h('a', { href: `#/${id}`, class: active === id ? 'on' : '', 'aria-current': active === id ? 'page' : undefined }, svg(ICONS[id]), label);
-  return h('nav', { class: 'tabs', 'aria-label': 'Main' }, tab('home', 'Home'), tab('offers', 'Offers'), tab('use', 'Use rewards'), tab('account', 'Account'));
+  return h('nav', { class: 'tabs', 'aria-label': 'Main' }, tab('home', 'Home'), tab('offers', 'Offers'), tab('use', 'Use rewards'), tab('stores', 'Stores'), tab('account', 'Account'));
 }
 
 function frame(active, ...children) {
@@ -728,7 +729,7 @@ async function renderAccount() {
       h(
         'section',
         { class: 'card' },
-        h('b', {}, 'Recent visits'),
+        h('div', { class: 'between' }, h('b', {}, 'Recent visits'), h('a', { href: '#/history' }, 'Full history')),
         visits.length
           ? h(
               'div',
@@ -762,6 +763,186 @@ async function renderAccount() {
   );
 }
 
+// ---------- stores ----------
+
+const LEAFLET = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet';
+let leafletLoading = null;
+/** The map library loads only when someone opens Stores. */
+function loadLeaflet() {
+  if (window.L) return Promise.resolve(window.L);
+  leafletLoading ??= new Promise((resolve, reject) => {
+    document.head.append(h('link', { rel: 'stylesheet', href: `${LEAFLET}.css`, integrity: 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=', crossorigin: '' }));
+    const s = h('script', { src: `${LEAFLET}.js`, integrity: 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=', crossorigin: '' });
+    s.onload = () => resolve(window.L);
+    s.onerror = () => ((leafletLoading = null), reject(new Error('The map didn’t load. Check your connection.')));
+    document.head.append(s);
+  });
+  return leafletLoading;
+}
+
+function milesTo(s) {
+  if (!here || s.lat === null) return null;
+  const rad = (d) => (d * Math.PI) / 180;
+  const x = Math.sin(rad(s.lat - here.lat) / 2) ** 2 + Math.cos(rad(here.lat)) * Math.cos(rad(s.lat)) * Math.sin(rad(s.lng - here.lng) / 2) ** 2;
+  return 2 * 3958.8 * Math.asin(Math.sqrt(x));
+}
+
+/** Google Maps directions; on a phone this opens the Maps app. */
+function directionsUrl(s) {
+  const to = s.lat !== null ? `${s.lat},${s.lng}` : [s.name, s.address, s.city, s.state, s.zip].filter(Boolean).join(', ');
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(to)}`;
+}
+
+const storeLine = (s) => [s.address, [s.city, s.state].filter(Boolean).join(', ') + (s.zip ? ` ${s.zip}` : '')].filter((x) => x.trim()).join(' · ');
+
+function storeCard(s, homeId) {
+  const miles = milesTo(s);
+  return h(
+    'article',
+    { class: 'promo store-card', id: `store-${s.id}` },
+    h(
+      'div',
+      { class: 'art-wrap' },
+      s.photoUrl
+        ? h('div', { class: 'art' }, h('img', { src: s.photoUrl, alt: `${s.name} store`, loading: 'lazy', decoding: 'async' }))
+        : artFrame({ headline: s.name, kind: 'fuel', stockArtUrl: '/app/stock/pump.svg' }),
+      s.id === homeId && h('span', { class: 'ribbon' }, svg(ICONS.pin), 'Your store'),
+    ),
+    h(
+      'div',
+      { class: 'promo-body' },
+      h('div', { class: 'between' }, h('b', { class: 'store-name' }, s.name), miles !== null && h('span', { class: 'sub' }, `${miles < 10 ? miles.toFixed(1) : Math.round(miles)} mi`)),
+      storeLine(s) && h('span', { class: 'sub' }, storeLine(s)),
+      s.tagline && h('span', {}, s.tagline),
+      s.hours && h('span', { class: 'sub' }, `Hours: ${s.hours}`),
+      s.loyaltyLive
+        ? s.offers > 0 && h('span', { class: 'kicker' }, `${s.offers} ${s.offers === 1 ? 'offer' : 'offers'} for you here`)
+        : h('span', { class: 'kicker brand' }, 'Rewards coming soon'),
+      h(
+        'div',
+        { class: 'row-btns' },
+        h('a', { class: 'pill-btn', href: directionsUrl(s), target: '_blank', rel: 'noopener' }, 'Directions'),
+        s.phone && h('a', { class: 'pill-btn outline', href: `tel:${s.phone}` }, 'Call'),
+        s.loyaltyLive && s.offers > 0 && h('a', { class: 'pill-btn outline', href: '#/offers', onclick: () => (offerStoreId = s.id) }, 'Offers'),
+      ),
+    ),
+  );
+}
+
+async function findStoresNear() {
+  try {
+    here = await locate();
+  } catch (e) {
+    toast(e.message);
+  }
+  renderStores();
+}
+
+async function renderStores() {
+  const { stores, homeStoreId } = await api('GET', '/stores');
+  const placed = stores.filter((s) => s.lat !== null);
+  const sorted = here ? [...stores].sort((a, b) => (milesTo(a) ?? 1e9) - (milesTo(b) ?? 1e9)) : [...stores].sort((a, b) => Number(b.id === homeStoreId) - Number(a.id === homeStoreId));
+  const mapEl = h('div', { class: 'store-map', role: 'region', 'aria-label': 'Map of stores' });
+  frame(
+    'stores',
+    h('header', { class: 'page-title' }, h('h1', {}, 'Stores'), h('span', {}, `${stores.length} ${stores.length === 1 ? 'location' : 'locations'}`)),
+    h(
+      'main',
+      { class: 'content' },
+      placed.length ? mapEl : h('div', { class: 'card sub' }, 'The store map is coming soon.'),
+      h('div', { class: 'between' }, h('b', {}, here ? 'Closest to you' : 'All stores'), !here && h('button', { class: 'filter', onclick: findStoresNear }, svg(ICONS.pin), ' Near me')),
+      sorted.map((s) => storeCard(s, homeStoreId)),
+    ),
+  );
+  if (!placed.length) return;
+  try {
+    const L = await loadLeaflet();
+    if (!mapEl.isConnected) return;
+    const map = L.map(mapEl, { scrollWheelZoom: false, attributionControl: true });
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+    const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#c8102e';
+    for (const s of placed) {
+      const pop = h('div', { class: 'map-pop' }, h('b', {}, s.name), storeLine(s) && h('div', {}, storeLine(s)), h('a', { href: directionsUrl(s), target: '_blank', rel: 'noopener' }, 'Directions'), ' · ', h('a', { href: `#store-${s.id}`, onclick: (e) => (e.preventDefault(), document.getElementById(`store-${s.id}`)?.scrollIntoView({ behavior: 'smooth' })) }, 'Details'));
+      L.circleMarker([s.lat, s.lng], { radius: s.id === homeStoreId ? 11 : 9, color: '#fff', weight: 3, fillColor: accent, fillOpacity: 1 }).addTo(map).bindPopup(pop);
+    }
+    const points = placed.map((s) => [s.lat, s.lng]);
+    if (here) {
+      L.circleMarker([here.lat, here.lng], { radius: 7, color: '#fff', weight: 3, fillColor: '#1a73e8', fillOpacity: 1 }).addTo(map).bindPopup('You are here');
+      const nearest = sorted.find((s) => s.lat !== null);
+      if (nearest) points.splice(0, points.length, [here.lat, here.lng], [nearest.lat, nearest.lng]);
+    }
+    if (points.length === 1) map.setView(points[0], 13);
+    else map.fitBounds(points, { padding: [30, 30], maxZoom: 13 });
+  } catch (e) {
+    mapEl.replaceChildren(h('div', { class: 'sub', style: 'padding:16px' }, e.message));
+  }
+}
+
+// ---------- history ----------
+
+let historyPages = null;
+
+async function renderHistory(more) {
+  if (!more) historyPages = null;
+  const last = historyPages?.entries.at(-1);
+  const page = await api('GET', `/history${more && last ? `?before=${encodeURIComponent(last.id)}` : ''}`);
+  historyPages = historyPages ? { ...page, entries: [...historyPages.entries, ...page.entries] } : page;
+  const { totals, entries } = historyPages;
+  const stat = (label, value) => h('div', { class: 'stat' }, h('b', {}, value), h('span', {}, label));
+  const byMonth = [];
+  for (const e of entries) {
+    const month = new Date(e.at).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    if (byMonth.at(-1)?.month !== month) byMonth.push({ month, list: [] });
+    byMonth.at(-1).list.push(e);
+  }
+  const row = (e) => {
+    const d = new Date(e.at);
+    const what = [e.gallons ? `${e.gallons} gal${e.grade ? ` ${e.grade}` : ''}` : '', e.items ? `${e.items} ${e.items === 1 ? 'item' : 'items'} inside` : ''].filter(Boolean).join(' · ');
+    return h(
+      'div',
+      { class: 'tx' },
+      h(
+        'div',
+        { class: 'tx-main' },
+        h('b', {}, e.store),
+        h('span', { class: 'sub' }, `${d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}, ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}${e.storePlace ? ` · ${e.storePlace}` : ''}`),
+        what && h('span', { class: 'sub' }, what),
+        e.rewards.length > 0 && h('span', { class: 'tx-reward' }, svg(ICONS.check), e.rewards.join(', ')),
+      ),
+      h(
+        'div',
+        { class: 'tx-nums' },
+        h('b', {}, money(e.paidCents)),
+        e.savedCents > 0 && h('span', { class: 'good' }, `Saved ${money(e.savedCents)}`),
+        e.pointsEarned > 0 && h('span', { class: 'good' }, `+${e.pointsEarned.toLocaleString()} pts`),
+        e.pointsSpent > 0 && h('span', { class: 'spent' }, `−${e.pointsSpent.toLocaleString()} pts`),
+      ),
+    );
+  };
+  frame(
+    'account',
+    h('header', { class: 'page-title' }, h('a', { class: 'back', href: '#/account' }, '‹ Account'), h('h1', {}, 'History'), h('span', {}, 'Every visit where you used your phone number or barcode')),
+    h(
+      'main',
+      { class: 'content' },
+      h(
+        'section',
+        { class: 'card stats' },
+        stat('Visits', totals.visits.toLocaleString()),
+        stat('Spent', money(totals.paidCents)),
+        stat('Saved', money(totals.savedCents)),
+        stat('Points earned', totals.pointsEarned.toLocaleString()),
+        stat('Points used', totals.pointsSpent.toLocaleString()),
+        stat('Points now', totals.pointsBalance.toLocaleString()),
+      ),
+      entries.length
+        ? byMonth.map((g) => h('section', { class: 'card' }, h('b', { class: 'month' }, g.month), h('div', { class: 'tx-list' }, g.list.map(row))))
+        : h('div', { class: 'card sub' }, 'Your visits show up here after you enter your phone at the pump or register.'),
+      historyPages.more && h('button', { class: 'cta secondary', onclick: () => renderHistory(true) }, 'Show older visits'),
+    ),
+  );
+}
+
 // ---------- router ----------
 
 let program = null;
@@ -785,6 +966,11 @@ async function render() {
     }
     if (page === 'use') return await renderUse();
     if (page === 'account') return await renderAccount();
+    if (page === 'history') return await renderHistory();
+    if (page === 'stores') {
+      if (!here) await refreshHereIfAllowed();
+      return await renderStores();
+    }
     return await renderHome();
   } catch (e) {
     if (!token) return renderJoin();

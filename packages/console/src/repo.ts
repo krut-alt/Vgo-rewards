@@ -198,6 +198,14 @@ export class Repo {
     if ((store.lat === undefined) !== (store.lng === undefined)) throw new ConsoleError('Enter both latitude and longitude, or neither.');
     if (store.lat !== undefined && (!Number.isFinite(store.lat) || Math.abs(store.lat) > 90 || !Number.isFinite(store.lng) || Math.abs(store.lng!) > 180))
       throw new ConsoleError('That map location doesn’t look right. Use decimal latitude and longitude, like 34.85, -82.39.');
+    for (const k of ['tagline', 'hours'] as const) {
+      const v = store[k]?.trim();
+      if (!v) delete store[k];
+      else if (v.length > 80) throw new ConsoleError(`Keep the ${k === 'hours' ? 'hours' : 'promo line'} under 80 characters.`);
+      else store[k] = v;
+    }
+    if (!store.photoMediaId) delete store.photoMediaId;
+    else if (!this.data.media?.some((x) => x.id === store.photoMediaId)) throw new ConsoleError('That store photo is no longer in the artwork library.');
     const unknown = store.groupIds.filter((g) => !this.data.groups.some((x) => x.id === g));
     if (unknown.length) throw new ConsoleError(`Unknown store group ${unknown[0]}.`);
     const i = this.data.stores.findIndex((s) => s.id === store.id);

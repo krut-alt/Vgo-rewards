@@ -323,6 +323,30 @@ export class MemberApi {
     return nearestWithin(targeted, at, r.geofence!.radiusMiles);
   }
 
+  /** Every location for the app's store locator, with how many offers the member can use there. */
+  storeLocator(m: ConsoleMember) {
+    const home = this.homeStore(m);
+    return {
+      homeStoreId: home.id,
+      stores: this.repo.data.stores.map((s) => ({
+        id: s.id,
+        name: s.name,
+        address: s.address ?? '',
+        city: s.city,
+        state: s.state,
+        zip: s.zip ?? '',
+        phone: s.phone ?? '',
+        lat: s.lat ?? null,
+        lng: s.lng ?? null,
+        tagline: s.tagline ?? '',
+        hours: s.hours ?? '',
+        photoUrl: s.photoMediaId ? mediaUrl(s.photoMediaId) : null,
+        loyaltyLive: s.loyaltyLive,
+        offers: s.loyaltyLive ? this.offers(m, s.id).offers.length : 0,
+      })),
+    };
+  }
+
   redeemOptions(m: ConsoleMember, store = this.homeStore(m)): RedeemOption[] {
     return this.runningAt(store)
       .filter((r) => r.section === 'redeem')
@@ -511,6 +535,47 @@ export class MemberApi {
         savedCents: e.discounts.reduce((s, d) => s + d.centsOff, 0),
         rewards: e.discounts.filter((d) => d.centsOff > 0).map((d) => name(d.ruleId)),
       }));
+  }
+
+  /**
+   * The member's full transaction history, newest first, a page at a time (`before` is the id
+   * of the last entry already shown), with lifetime totals across every visit.
+   */
+  history(m: ConsoleMember, before?: string, limit = 25) {
+    const stores = this.repo.data.stores;
+    const name = (id: string) => this.repo.data.rules.find((r) => r.id === id)?.name ?? 'Reward';
+    const mine = this.repo.data.ledger.filter((e) => e.memberId === m.id).reverse();
+    const view = (e: (typeof mine)[number]) => {
+      const insideCents = e.tx.items.reduce((s, i) => s + i.qty * i.unitCents, 0);
+      const fuelCents = e.tx.fuel ? Math.round(e.tx.fuel.gallons * e.tx.fuel.pricePerGallonCents) : 0;
+      const savedCents = e.discounts.reduce((s, d) => s + d.centsOff, 0);
+      const store = stores.find((s) => s.id === e.tx.storeId);
+      return {
+        id: e.tx.id,
+        at: e.tx.at,
+        store: store?.name ?? e.tx.storeId,
+        storePlace: store?.city ? `${store.city}, ${store.state}` : (store?.state ?? ''),
+        insideCents,
+        fuelCents,
+        gallons: e.tx.fuel?.gallons ?? null,
+        grade: e.tx.fuel?.grade ?? null,
+        items: e.tx.items.reduce((s, i) => s + i.qty, 0),
+        savedCents,
+        paidCents: Math.max(0, insideCents + fuelCents - savedCents),
+        pointsEarned: e.pointsEarned,
+        pointsSpent: e.pointsSpent,
+        rewards: [...new Set([...e.discounts.filter((d) => d.centsOff > 0).map((d) => name(d.ruleId)), ...(e.pointsSpent > 0 ? (e.tx.redeemRuleIds ?? []).map(name) : [])])],
+      };
+    };
+    const all = mine.map(view);
+    const start = before ? all.findIndex((v) => v.id === before) + 1 : 0;
+    const page = all.slice(start, start + limit);
+    const sum = (k: 'paidCents' | 'savedCents' | 'pointsEarned' | 'pointsSpent') => all.reduce((s, v) => s + v[k], 0);
+    return {
+      totals: { visits: all.length, paidCents: sum('paidCents'), savedCents: sum('savedCents'), pointsEarned: sum('pointsEarned'), pointsSpent: sum('pointsSpent'), pointsBalance: m.pointsBalance },
+      entries: page,
+      more: start + limit < all.length,
+    };
   }
 
   /** Public data the sign-up screen shows before anyone signs in. */
