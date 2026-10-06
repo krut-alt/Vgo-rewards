@@ -871,14 +871,13 @@ async function renderStores() {
     h(
       'main',
       { class: 'content' },
-      placed.length ? mapEl : h('div', { class: 'card sub' }, 'The store map is coming soon.'),
-      placed.length > 0 && h('div', { class: 'map-key' }, h('span', {}, h('i', { class: 'dot live' }), 'Rewards live'), h('span', {}, h('i', { class: 'dot soon' }), 'Coming soon')),
+      mapEl,
+      h('div', { class: 'map-key' }, h('span', {}, h('i', { class: 'dot live' }), 'Rewards live'), h('span', {}, h('i', { class: 'dot soon' }), 'Coming soon')),
       h('p', { class: 'fine' }, 'Rewards are valid only at participating locations where they are live.'),
       h('div', { class: 'between' }, h('b', {}, here ? 'Closest to you' : 'All stores'), !here && h('button', { class: 'filter', onclick: findStoresNear }, svg(ICONS.pin), ' Near me')),
       sorted.map((s) => storeCard(s, homeStoreId)),
     ),
   );
-  if (!placed.length) return;
   try {
     const L = await loadLeaflet();
     if (!mapEl.isConnected) return;
@@ -895,7 +894,9 @@ async function renderStores() {
       const nearest = sorted.find((s) => s.lat !== null);
       if (nearest) points.splice(0, points.length, [here.lat, here.lng], [nearest.lat, nearest.lng]);
     }
-    if (points.length === 1) map.setView(points[0], 13);
+    // With no store on the map yet, show the area VGO serves (South Carolina and Fayetteville, NC).
+    if (!points.length) map.fitBounds([[32.0, -83.4], [35.3, -78.8]]);
+    else if (points.length === 1) map.setView(points[0], 13);
     else map.fitBounds(points, { padding: [30, 30], maxZoom: 13 });
   } catch (e) {
     mapEl.replaceChildren(h('div', { class: 'sub', style: 'padding:16px' }, e.message));
