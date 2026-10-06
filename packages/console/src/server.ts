@@ -240,6 +240,10 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
       void fillSpots?.();
       return [200, saved];
     }
+    if (method === 'DELETE' && (match = m(/^\/stores\/([\w-]+)$/))) {
+      repo.deleteStore(match[1]!, actor);
+      return [200, { ok: true }];
+    }
     // Gas prices shown in the app, typed in by hand. The POS link keeps them current once it is live.
     if (method === 'PUT' && (match = m(/^\/stores\/([\w-]+)\/fuel-prices$/))) {
       const store = myStores().find((s) => s.id === match![1]);

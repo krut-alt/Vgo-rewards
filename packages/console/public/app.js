@@ -1703,6 +1703,27 @@ function storeDialog(store, draft) {
     h(
       'div',
       { class: 'row' },
+      !isNew &&
+        s.id !== boot.pilot.storeId &&
+        h(
+          'button',
+          {
+            class: 'btn ghost',
+            onclick: async () => {
+              if (!confirm(`Delete ${s.name}? It comes off the map and the store list. Past sales stay in Results, and offers that ran only here are retired.`)) return;
+              try {
+                await api('DELETE', `/stores/${s.id}`);
+                await reload();
+                closeDialog();
+                toast('Location deleted');
+                render();
+              } catch (err) {
+                errors.replaceChildren(errorBox(err));
+              }
+            },
+          },
+          'Delete location',
+        ),
       h('div', { class: 'grow' }),
       h('button', { class: 'btn ghost', onclick: closeDialog }, 'Cancel'),
       h(

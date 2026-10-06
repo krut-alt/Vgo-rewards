@@ -98,3 +98,28 @@ describe('items and gas prices over HTTP', () => {
     expect(later.stores.find((s) => s.id === 'vgo-01')!.fuelPrices).toEqual([]);
   });
 });
+
+describe('deleting a location', () => {
+  it('removes the store and cleans up what pointed at it', () => {
+    const repo = new Repo(seedData(now), () => {}, () => now);
+    const d = repo.data;
+    const gone = d.stores.find((s) => s.id !== d.pilot.storeId)!;
+    gone.loyaltyLive = true;
+    expect(() => repo.deleteStore(gone.id, ADMIN)).toThrow(/Offline/);
+    expect(() => repo.deleteStore(d.pilot.storeId, ADMIN)).toThrow(/pilot/);
+    gone.loyaltyLive = false;
+    const m = repo.createMember({ name: 'Bo', phone: '8645550199', homeStoreId: gone.id }, ADMIN);
+    const only = d.rules[0]!;
+    only.scope = { kind: 'stores', storeIds: [gone.id] };
+    const both = d.rules[1]!;
+    both.scope = { kind: 'stores', storeIds: [gone.id, d.pilot.storeId] };
+    d.currentItems = { [gone.id]: 'u1' };
+
+    repo.deleteStore(gone.id, ADMIN);
+    expect(d.stores.some((s) => s.id === gone.id)).toBe(false);
+    expect(repo.member(m.id).homeStoreId).toBe(d.pilot.storeId);
+    expect(only.status).toBe('retired');
+    expect(both.scope).toEqual({ kind: 'stores', storeIds: [d.pilot.storeId] });
+    expect(d.currentItems).toEqual({});
+  });
+});
