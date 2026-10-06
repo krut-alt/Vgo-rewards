@@ -301,6 +301,8 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
       const id = match[1]!;
       const users = repo.data.rules.filter((r) => r.artwork?.mediaId === id);
       if (users.length) throw new ConsoleError(`"${users[0]!.name}" uses this artwork. Change its artwork first.`, 409);
+      const site = repo.data.stores.find((s) => s.photoMediaId === id);
+      if (site) throw new ConsoleError(`${site.name} uses this picture as its store photo. Change it on the Locations page first.`, 409);
       const info = repo.data.media?.find((x) => x.id === id);
       if (!info) throw new ConsoleError('Artwork not found.', 404);
       repo.data.media = repo.data.media!.filter((x) => x.id !== id);
@@ -397,6 +399,8 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
       return [200, members.setRedeem(member, ruleIds)];
     }
     if (method === 'GET' && path === '/visits') return [200, members.visits(member)];
+    if (method === 'GET' && path === '/stores') return [200, members.storeLocator(member)];
+    if (method === 'GET' && path === '/history') return [200, members.history(member, url.searchParams.get('before') ?? undefined)];
     if (method === 'POST' && path === '/signout') {
       members.signOut(req.headers.authorization);
       return [200, { ok: true }];

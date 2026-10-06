@@ -51,6 +51,10 @@ export interface ConsoleStore {
   lat?: number;
   lng?: number;
   loyaltyLive: boolean;
+  /** Store locator in the app: a photo from the artwork library, a short promo line and opening hours. */
+  photoMediaId?: string;
+  tagline?: string;
+  hours?: string;
   /** POS categories mapped for this store, e.g. "sandwiches". Offers on unmapped categories get a warning. */
   mappedCategories: string[];
 }

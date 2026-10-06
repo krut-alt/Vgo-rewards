@@ -1605,9 +1605,11 @@ function renderRules() {
 
 // ---------- Stores and groups ----------
 
-function storeDialog(store) {
-  const isNew = !store;
-  const s = store
+function storeDialog(store, draft) {
+  const isNew = draft ? !draft.id : !store;
+  const s = draft
+    ? draft
+    : store
     ? structuredClone(store)
     : { id: '', name: '', address: '', city: '', state: 'SC', zip: '', contactName: '', email: '', phone: '', groupIds: [], pos: 'verifone-commander', posSiteId: '', loyaltyLive: false, mappedCategories: [] };
   const errors = h('div', {});
@@ -1644,7 +1646,7 @@ function storeDialog(store) {
       field(
         'Map location (for near-store promos)',
         h('input', {
-          value: s.lat !== undefined && s.lat !== null ? `${s.lat}, ${s.lng}` : '',
+          value: s.mapSpot ?? (s.lat !== undefined && s.lat !== null ? `${s.lat}, ${s.lng}` : ''),
           placeholder: '34.8526, -82.3940',
           oninput: (e) => (s.mapSpot = e.target.value),
         }),
@@ -1652,6 +1654,15 @@ function storeDialog(store) {
       ),
     ),
     h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: s.loyaltyLive, onchange: (e) => (s.loyaltyLive = e.target.checked) }), 'Loyalty live at this store (POS connected and tested)'),
+    h('h3', { class: 'dialog-section' }, 'In the app’s store locator'),
+    h('p', { class: 'note' }, 'Members see every location on a map, with this photo, promo line and hours, plus directions in Google Maps. Stores show as a dot once they have a map location.'),
+    storePhotoField(s),
+    h(
+      'div',
+      { class: 'grid2' },
+      field('Promo line (optional)', text('tagline', { maxlength: 80, placeholder: 'Hot food, cold drinks, free air' })),
+      field('Hours (optional)', text('hours', { maxlength: 80, placeholder: 'Open 24 hours' })),
+    ),
     field(
       'Groups',
       h(
@@ -1690,7 +1701,7 @@ function storeDialog(store) {
           onclick: async () => {
             try {
               const body = { ...s };
-              for (const k of ['address', 'zip', 'contactName', 'email', 'phone', 'posSiteId']) if (!String(body[k] ?? '').trim()) body[k] = null;
+              for (const k of ['address', 'zip', 'contactName', 'email', 'phone', 'posSiteId', 'tagline', 'hours', 'photoMediaId']) if (!String(body[k] ?? '').trim()) body[k] = null;
               if (body.mapSpot !== undefined) {
                 const nums = body.mapSpot.match(/-?\d+(?:\.\d+)?/g) ?? [];
                 if (!body.mapSpot.trim()) (body.lat = null), (body.lng = null);
@@ -1713,6 +1724,41 @@ function storeDialog(store) {
       ),
     ),
   );
+}
+
+/** The store's photo for the app: upload one (sized like reward artwork) or reuse one from the library. */
+function storePhotoField(s) {
+  const box = h('div', { class: 'field' });
+  const file = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp', hidden: true });
+  const draw = (status) =>
+    box.replaceChildren(
+      h('span', {}, 'Store photo (optional)'),
+      s.photoMediaId ? h('div', { class: 'art-frame', style: 'max-width:320px' }, h('img', { src: `/media/${s.photoMediaId}`, alt: 'Store photo' })) : h('span', { class: 'hint' }, 'Without a photo, the app shows the store name on a VGO banner.'),
+      status ?? null,
+      h(
+        'div',
+        { class: 'row wrap' },
+        h('button', { class: 'btn', type: 'button', onclick: () => file.click() }, s.photoMediaId ? 'Replace photo' : 'Upload photo'),
+        h('button', { class: 'btn ghost', type: 'button', onclick: () => artLibraryDialog((id) => ((s.photoMediaId = id), reopen())) }, 'Choose from library'),
+        s.photoMediaId && h('button', { class: 'btn ghost', type: 'button', onclick: () => ((s.photoMediaId = null), draw()) }, 'Remove'),
+      ),
+      file,
+    );
+  // The library picker replaces this dialog, so come back to the location with the photo picked.
+  const reopen = () => storeDialog(null, s);
+  file.onchange = async () => {
+    const picked = file.files?.[0];
+    if (!picked) return;
+    draw(h('p', { class: 'note' }, 'Sizing and uploading…'));
+    try {
+      s.photoMediaId = (await uploadArt(picked, 'fill')).id;
+      draw();
+    } catch (err) {
+      draw(errorBox(err));
+    }
+  };
+  draw();
+  return box;
 }
 
 function groupDialog(group) {
