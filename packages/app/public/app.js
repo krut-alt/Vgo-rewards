@@ -296,7 +296,7 @@ function offerCard(o, onChange) {
   return h(
     'article',
     { class: 'promo' },
-    h('div', { class: 'art-wrap' }, artFrame(o), o.nearby && h('span', { class: 'ribbon' }, svg(ICONS.pin), 'Near you'), o.ends && h('span', { class: 'ends' }, `Ends ${o.ends}`)),
+    h('div', { class: 'art-wrap' }, artFrame(o), o.nearby && h('span', { class: 'ribbon' }, svg(ICONS.pin), 'Near you'), !o.nearby && o.skupos && h('span', { class: 'ribbon skupos' }, 'Skupos promo'), o.ends && h('span', { class: 'ends' }, `Ends ${o.ends}`)),
     h(
       'div',
       { class: 'promo-body' },

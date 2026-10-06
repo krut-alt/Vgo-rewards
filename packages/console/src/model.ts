@@ -1,7 +1,8 @@
 import type { ItemCatalog } from './items.js';
 import type { MediaInfo } from './media.js';
 // Console data model: what the jobber manages, stored as one JSON document for the pilot.
-import type { Rule, StoreId, Transaction } from '../../engine/src/index.js';
+import type { Rule, RuleStatus, StoreId, Transaction } from '../../engine/src/index.js';
+import type { SkuposState } from './skupos.js';
 
 /** Where a rule shows up in the console. Earn and redeem live on Reward rules, the rest on Offers. */
 export type Section = 'earn' | 'redeem' | 'offer';
@@ -25,6 +26,11 @@ export interface ConsoleRule extends Rule {
   headline?: string;
   /** Shown in the big slider at the top of the app's home screen. */
   featured?: boolean;
+  /**
+   * Made by the daily Skupos import (skupos.ts). `setStatus` is the status the import last set, so a
+   * Skupos offer someone paused or retired by hand stays that way.
+   */
+  skupos?: { promoId: string; brand: string; setStatus: RuleStatus };
   createdAt: string;
   updatedAt: string;
 }
@@ -51,6 +57,10 @@ export interface ConsoleStore {
   lat?: number;
   lng?: number;
   loyaltyLive: boolean;
+  /** Enrolled in Skupos (Engage brand promotions). Enrolled stores that are live get Skupos promotions in the app automatically. */
+  skuposEnrolled?: boolean;
+  /** The store's ID in Skupos, to match promotions that list their stores. Optional. */
+  skuposStoreId?: string;
   /** Store locator in the app: a photo from the artwork library, a short promo line and opening hours. */
   photoMediaId?: string;
   /** The address the automatic map lookup couldn't find; cleared when a map spot is set. */
@@ -225,6 +235,8 @@ export interface ConsoleData {
   itemUploads?: ItemUpload[];
   /** Data updates already applied to this file; see migrate.ts. */
   migrations?: string[];
+  /** Skupos promotions: the current list, and a log of every daily update. */
+  skupos?: SkuposState;
   /** When the pilot started, for "day 45 of 90" on Results. */
   pilot: { storeId: StoreId; startedOn: string; days: number };
 }

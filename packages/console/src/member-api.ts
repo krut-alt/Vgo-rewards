@@ -47,6 +47,8 @@ export interface AppOffer {
   stockArtUrl?: string;
   headline: string;
   featured: boolean;
+  /** A brand promotion that came in through Skupos; the app tags it. */
+  skupos?: boolean;
 }
 
 export interface RedeemOption {
@@ -286,7 +288,7 @@ export class MemberApi {
     const kind = offerKind(r);
     const where =
       r.scope.kind === 'all' ? 'all stores' : r.scope.kind === 'stores' && r.scope.storeIds.length === 1 ? 'this store only' : targetLabel(r.scope, stores, groups);
-    const label = { fuel: 'Fuel', food: 'Food and drink', brand: 'Brand offer', other: 'Offer' }[kind];
+    const label = r.skupos ? 'Skupos brand offer' : { fuel: 'Fuel', food: 'Food and drink', brand: 'Brand offer', other: 'Offer' }[kind];
     const days = r.schedule?.daysOfWeek;
     return {
       ruleId: r.id,
@@ -300,6 +302,7 @@ export class MemberApi {
       ...this.artFields(r),
       headline: promoHeadline(r),
       featured: Boolean(r.featured),
+      ...(r.skupos ? { skupos: true } : {}),
     };
   }
 

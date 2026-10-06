@@ -213,6 +213,10 @@ export class Repo {
       else if (v.length > 80) throw new ConsoleError(`Keep the ${k === 'hours' ? 'hours' : 'promo line'} under 80 characters.`);
       else store[k] = v;
     }
+    store.skuposStoreId = store.skuposStoreId?.trim();
+    if (!store.skuposStoreId) delete store.skuposStoreId;
+    if (store.skuposEnrolled) store.skuposEnrolled = true;
+    else delete store.skuposEnrolled;
     if (store.lat !== undefined) delete store.mapLookupFailed;
     if (!store.photoMediaId) delete store.photoMediaId;
     else if (!this.data.media?.some((x) => x.id === store.photoMediaId)) throw new ConsoleError('That store photo is no longer in the artwork library.');
@@ -222,6 +226,7 @@ export class Repo {
     if (i >= 0) this.data.stores[i] = store;
     else this.data.stores.push(store);
     this.log(actor, `${i >= 0 ? 'Updated' : 'Added'} location ${store.name}${store.loyaltyLive ? ' (loyalty live)' : ''}`);
+    if (Boolean(was?.skuposEnrolled) !== Boolean(store.skuposEnrolled)) this.log(actor, `${store.name} ${store.skuposEnrolled ? 'enrolled in' : 'taken off'} Skupos promotions`);
     this.save();
     return store;
   }

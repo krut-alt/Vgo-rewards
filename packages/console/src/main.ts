@@ -8,6 +8,7 @@ import { upstashConfigFromEnv, upstashStore } from './remote-store.js';
 import { Repo } from './repo.js';
 import { seedData } from './seed.js';
 import { createApp } from './server.js';
+import { skuposFeedFromEnv } from './skupos.js';
 import { smsSenderFromEnv } from './sms.js';
 
 const dataFile = resolve(process.env.VGO_DATA ?? 'data/console.json');
@@ -49,6 +50,10 @@ createApp(repo, resolve(process.env.VGO_PUBLIC ?? 'packages/console/public'), {
   media: upstash ? upstashMediaStore(upstash) : fileMediaStore(resolve(dirname(dataFile), 'media')),
   // Fills in map spots for stores from their addresses. VGO_GEOCODE=0 turns it off.
   ...(process.env.VGO_GEOCODE === '0' ? {} : { geocoder: freeGeocoder }),
+  // Skupos promotions update once a day. SKUPOS_FEED_URL (and SKUPOS_FEED_TOKEN if it needs one) is where the
+  // current list is read; without it the last list uploaded on the portal's Skupos page is used.
+  skuposFeed: skuposFeedFromEnv(),
+  skuposDaily: true,
 }).listen(port, host, () => {
   console.log(`VGO Rewards console: http://localhost:${port}   member app: http://localhost:${port}/app/   (data: ${upstash ? 'Upstash' : dataFile}, texts: ${sms.name})`);
 });

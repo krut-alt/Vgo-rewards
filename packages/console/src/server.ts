@@ -33,6 +33,7 @@ import { mediaUrl, memoryMediaStore, readUpload, type MediaStore } from './media
 import { addItemUpload, ALL_STORES, catalogFor, clearStoreItems, everyItem, parseItemsCsv, searchItems } from './items.js';
 import { computeResults } from './results.js';
 import { ADMIN } from './seed.js';
+import { SkuposSync, type SkuposFeed } from './skupos.js';
 import { STOCK_ART, pickStockArt, stockArtFor, stockArtUrl } from './stock-art.js';
 
 const TYPES: Record<string, string> = {
@@ -112,6 +113,10 @@ export interface AppOptions {
   media?: MediaStore;
   /** Finds map spots for stores from their addresses. Off in tests. */
   geocoder?: Geocoder;
+  /** Where the daily Skupos update reads the current promotions; without it, the last uploaded list is used. */
+  skuposFeed?: SkuposFeed;
+  /** Runs the Skupos update once a day on its own (at start-up, hourly checks and on portal use). Off in tests. */
+  skuposDaily?: boolean;
 }
 
 const COOKIE = 'vgo_portal';
@@ -152,6 +157,13 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
   const portal = opts.adminPassword ? new PortalAuthService(repo, opts.adminPassword, clock) : undefined;
   const posLink = new PosLink(repo, clock);
   const posAdapter = adapterFor(opts.posLinkAdapter);
+  const skupos = new SkuposSync(repo, clock, opts.skuposFeed);
+  // Free hosts sleep when idle, so besides the hourly check the update also runs on the first portal visit of the day.
+  const skuposDaily = () => void skupos.daily().catch((err) => console.error('[skupos]', err));
+  if (opts.skuposDaily) {
+    skuposDaily();
+    setInterval(skuposDaily, 60 * 60 * 1000).unref();
+  }
   // Without a portal password (local development) everyone is the master admin.
   const OPEN: SignedIn = { actor: ADMIN, user: { id: 'master', name: 'Jobber admin', email: 'admin', role: 'admin', storeIds: [] } };
 
@@ -175,6 +187,7 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
     })();
     let match: RegExpExecArray | null;
 
+    if (opts.skuposDaily) skuposDaily();
     if (method === 'GET' && path === '/me') return [200, { user: who.user, signInRequired: Boolean(portal) }];
 
     if (method === 'GET' && path === '/bootstrap') {
@@ -238,10 +251,12 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
       const store = await body<ConsoleStore>(req);
       const saved = repo.upsertStore({ ...withoutNulls(store), id: match[1]! } as ConsoleStore, actor);
       void fillSpots?.();
+      skupos.storesChanged();
       return [200, saved];
     }
     if (method === 'DELETE' && (match = m(/^\/stores\/([\w-]+)$/))) {
       repo.deleteStore(match[1]!, actor);
+      skupos.storesChanged();
       return [200, { ok: true }];
     }
     // Gas prices shown in the app, typed in by hand. The POS link keeps them current once it is live.
@@ -256,12 +271,15 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
     }
     if (method === 'POST' && (match = m(/^\/stores\/([\w-]+)\/live$/))) {
       const { live } = await body<{ live?: unknown }>(req);
-      return [200, repo.setStoreLive(match[1]!, Boolean(live), actor)];
+      const saved = repo.setStoreLive(match[1]!, Boolean(live), actor);
+      skupos.storesChanged();
+      return [200, saved];
     }
     if (method === 'POST' && path === '/stores') {
       const store = await body<ConsoleStore>(req);
       const saved = repo.upsertStore({ ...withoutNulls(store), id: '' } as ConsoleStore, actor);
       void fillSpots?.();
+      skupos.storesChanged();
       return [201, saved];
     }
     if (method === 'POST' && path === '/groups') {
@@ -401,6 +419,24 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
       repo.note(actor, `${store.name} now uses the all-stores item list`);
       repo.save();
       return [200, { ok: true }];
+    }
+    // Skupos promotions: what is running, the daily log, an uploaded list, and "update now".
+    if (method === 'GET' && path === '/skupos') {
+      adminOnly();
+      return [200, skupos.status()];
+    }
+    if (method === 'POST' && path === '/skupos/upload') {
+      adminOnly();
+      const { csv, fileName } = await body<{ csv?: string; fileName?: string }>(req, 5_000_000);
+      const run = skupos.upload(String(csv ?? ''), fileName ? String(fileName) : undefined);
+      repo.note(actor, `Uploaded the Skupos promotions list${fileName ? ` ${String(fileName).slice(0, 120)}` : ''}`);
+      repo.save();
+      return [200, { run, status: skupos.status() }];
+    }
+    if (method === 'POST' && path === '/skupos/run') {
+      adminOnly();
+      const run = await skupos.daily(true);
+      return [200, { run, status: skupos.status() }];
     }
     if (method === 'GET' && path === '/users') {
       adminOnly();
