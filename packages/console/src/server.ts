@@ -28,6 +28,7 @@ import { mediaUrl, memoryMediaStore, readUpload, type MediaStore } from './media
 import { parseItemsCsv, searchItems } from './items.js';
 import { computeResults } from './results.js';
 import { ADMIN } from './seed.js';
+import { STOCK_ART, pickStockArt, stockArtFor, stockArtUrl } from './stock-art.js';
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -40,6 +41,7 @@ const TYPES: Record<string, string> = {
 
 export function ruleView(repo: Repo, rule: ConsoleRule, now = new Date()) {
   const { stores, groups } = repo.data;
+  const stock = stockArtFor(rule, repo.data.items);
   return {
     ...rule,
     display: {
@@ -53,6 +55,8 @@ export function ruleView(repo: Repo, rule: ConsoleRule, now = new Date()) {
       headline: promoHeadline(rule),
       artKind: offerKind(rule),
       imageUrl: rule.artwork ? mediaUrl(rule.artwork.mediaId) : null,
+      stockArt: stock ? { id: stock.id, title: stock.title, url: stockArtUrl(stock.id) } : null,
+      autoStockArt: pickStockArt(rule, repo.data.items).id,
     },
   };
 }
@@ -172,6 +176,7 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
           rules: views(),
           presets: PRESETS,
           categories: CATEGORIES.map(({ id, label }) => ({ id, label })),
+          stockArt: STOCK_ART.map(({ id, title }) => ({ id, title, url: stockArtUrl(id) })),
           grades: FUEL_GRADES.map(({ id, label }) => ({ id, label })),
           draftExamples: DRAFT_EXAMPLES,
           pilot: d.pilot,

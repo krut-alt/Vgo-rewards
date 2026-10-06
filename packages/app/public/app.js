@@ -255,7 +255,13 @@ function frame(active, ...children) {
 /** The 16:9 picture on every reward: uploaded artwork, or the headline on a colored banner. */
 function artFrame(o, extra = '') {
   if (o.imageUrl) return h('div', { class: `art ${extra}` }, h('img', { src: o.imageUrl, alt: '', loading: 'lazy', decoding: 'async' }));
-  return h('div', { class: `art poster ${o.kind || 'other'} ${extra}` }, h('span', { class: 'poster-text' }, o.headline), h('img', { class: 'poster-logo', src: config.branding.logoDataUrl || '/app/vgo-logo.png', alt: '' }));
+  return h(
+    'div',
+    { class: `art poster ${o.kind || 'other'}${o.stockArtUrl ? ' has-pic' : ''} ${extra}` },
+    h('span', { class: 'poster-text' }, o.headline),
+    o.stockArtUrl && h('img', { class: 'poster-pic', src: o.stockArtUrl, alt: '', loading: 'lazy', decoding: 'async' }),
+    h('img', { class: 'poster-logo', src: config.branding.logoDataUrl || '/app/vgo-logo.png', alt: '' }),
+  );
 }
 
 function offerAction(o, onChange) {
@@ -304,7 +310,7 @@ function birthdayCard(b, m) {
   return h(
     'article',
     { class: 'promo bday' },
-    h('div', { class: 'art-wrap' }, o.imageUrl ? artFrame(o) : h('div', { class: 'art poster birthday' }, h('span', { class: 'poster-text' }, `Happy birthday, ${m.firstName}!`), h('span', { class: 'confetti', 'aria-hidden': 'true' }))),
+    h('div', { class: 'art-wrap' }, o.imageUrl ? artFrame(o) : h('div', { class: `art poster birthday${o.stockArtUrl ? ' has-pic' : ''}` }, h('span', { class: 'poster-text' }, `Happy birthday, ${m.firstName}!`), h('span', { class: 'confetti', 'aria-hidden': 'true' }), o.stockArtUrl && h('img', { class: 'poster-pic', src: o.stockArtUrl, alt: '' }))),
     h('div', { class: 'promo-body' }, h('span', { class: 'kicker' }, 'Your birthday treat'), h('span', { class: 'title' }, o.name), h('span', { class: 'sub' }, o.line), offerAction(o, renderHome)),
   );
 }

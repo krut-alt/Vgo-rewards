@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600"><ellipse cx="300" cy="560" rx="190" ry="22" fill="#000" opacity=".18"/>
+<rect x="140" y="270" width="320" height="270" rx="16" fill="#c8102e"/>
+<rect x="115" y="210" width="370" height="80" rx="14" fill="#e01e3c"/>
+<rect x="275" y="210" width="50" height="330" fill="#ffd23f"/>
+<path d="M300 210 c-40 -90 -160 -80 -120 -20 c20 25 80 25 120 20z M300 210 c40 -90 160 -80 120 -20 c-20 25 -80 25 -120 20z" fill="#ffd23f" stroke="#e0a800" stroke-width="6"/>
+<rect x="150" y="290" width="22" height="240" rx="11" fill="#fff" opacity=".2"/>
+</svg>

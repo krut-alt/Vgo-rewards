@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600"><ellipse cx="300" cy="560" rx="190" ry="22" fill="#000" opacity=".18"/>
+<path d="M165 90 q135 -30 270 0 l-15 30 l25 360 l-10 30 q-135 30 -270 0 l-10 -30 l25 -360z" fill="#ffb81c"/>
+<path d="M165 90 q135 -30 270 0 l-12 26 q-123 -26 -246 0z" fill="#e2552b"/>
+<path d="M155 480 q135 30 270 0 l10 30 q-135 30 -290 0z" fill="#e2552b"/>
+<circle cx="300" cy="270" r="95" fill="#e2552b"/>
+<text x="300" y="262" font-family="Arial Black,Arial,sans-serif" font-weight="900" font-size="52" fill="#fff" text-anchor="middle">CHIPS</text>
+<text x="300" y="306" font-family="Arial,sans-serif" font-weight="700" font-size="24" fill="#fff4c2" text-anchor="middle">CLASSIC SALTED</text>
+<rect x="190" y="110" width="26" height="360" rx="13" fill="#fff" opacity=".25"/>
+<g fill="#f7d36b" stroke="#d9a62e" stroke-width="5"><path d="M430 470 q40 -40 80 -10 q-20 50 -80 10z"/><path d="M95 450 q30 -50 80 -20 q-30 50 -80 20z"/><path d="M450 400 q40 -20 60 20 q-40 30 -60 -20z"/></g>
+</svg>

@@ -188,7 +188,7 @@ body.signed-out .nav a, body.store-user .nav a[data-admin] { display: none; }
 
 /* Reward artwork: one 16:9 size everywhere */
 .art-frame { position: relative; aspect-ratio: 16 / 9; width: 100%; border-radius: 12px; overflow: hidden; background: var(--main); }
-.art-frame > img:not(.poster-logo) { width: 100%; height: 100%; object-fit: cover; display: block; }
+.art-frame > img:not(.poster-logo):not(.poster-pic) { width: 100%; height: 100%; object-fit: cover; display: block; }
 .art-frame.poster { display: flex; align-items: center; padding: 0 7%; container-type: inline-size; }
 .art-frame.poster.fuel { background: linear-gradient(120deg, #0f2747 0%, #1d4a85 70%, #c8102e 70.2%, #c8102e 74%, #0f2747 74.2%); }
 .art-frame.poster.food { background: linear-gradient(135deg, #c8102e 0%, #e2552b 100%); }
@@ -197,6 +197,14 @@ body.signed-out .nav a, body.store-user .nav a[data-admin] { display: none; }
 .poster-text { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; color: #fff; font-size: 13cqw; line-height: 0.92; max-width: 72%; text-transform: uppercase; letter-spacing: 0.5px; }
 .art-frame.poster.other .poster-text { color: #8a0b1f; }
 .poster-logo { position: absolute; right: 5%; bottom: 8%; width: 18%; opacity: 0.95; }
+.poster-pic { position: absolute; right: 3%; bottom: 3%; height: 94%; width: auto; filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.22)); }
+.art-frame.poster.has-pic .poster-text { max-width: 54%; font-size: 11.5cqw; margin-top: 6%; }
+.art-frame.poster.has-pic .poster-logo { left: 5%; right: auto; top: 8%; bottom: auto; width: 13%; }
+.stock-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; margin-top: 8px; }
+.stock-grid button { border: 2px solid var(--line, #dfe5ec); border-radius: 10px; background: #0f2747; padding: 6px 4px 4px; cursor: pointer; color: #fff; font-size: 11px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.stock-grid button img { width: 56px; height: 56px; }
+.stock-grid button.on { border-color: var(--accent, #c8102e); box-shadow: 0 0 0 2px var(--accent, #c8102e); }
+.stock-grid button.none { background: #f4f6f9; color: #333; justify-content: center; }
 .app-card { background: #fff; border: 1px solid var(--line, #dcdfe3); border-radius: 16px; overflow: hidden; }
 .app-card .art-frame { border-radius: 0; }
 .app-card-body { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 6px; }

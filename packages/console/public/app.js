@@ -321,7 +321,7 @@ function renderOffers() {
                   h(
                     'td',
                     { class: 'strong' },
-                    h('div', { class: 'offer-name' }, h('div', { class: 'thumb' }, artFrame({ imageUrl: r.display.imageUrl, headline: r.display.headline, kind: r.display.artKind })), h('span', {}, r.name, r.featured && h('span', { class: 'feat' }, 'Featured'))),
+                    h('div', { class: 'offer-name' }, h('div', { class: 'thumb' }, artFrame({ imageUrl: r.display.imageUrl, stockArtUrl: r.display.stockArt?.url, headline: r.display.headline, kind: r.display.artKind })), h('span', {}, r.name, r.featured && h('span', { class: 'feat' }, 'Featured'))),
                   ),
                   h('td', {}, r.display.type),
                   h('td', {}, r.display.target),
@@ -396,6 +396,7 @@ function blankForm() {
     geofence: false,
     radiusMiles: 1,
     mediaId: null,
+    stockArt: '',
     headline: '',
     featured: false,
   };
@@ -418,6 +419,7 @@ function formFromRule(rule) {
     geofence: Boolean(rule.geofence),
     radiusMiles: rule.geofence?.radiusMiles ?? 1,
     mediaId: rule.artwork?.mediaId ?? null,
+    stockArt: rule.stockArt ?? '',
     headline: rule.headline ?? '',
     featured: rule.featured ?? false,
     starts: rule.schedule?.startsAt ? localYmd(rule.schedule.startsAt) : '',
@@ -542,6 +544,7 @@ function ruleFromForm(f) {
     requiresClip: f.requiresClip || (f.section === 'offer' && f.geofence) || null,
     geofence: f.section === 'offer' && f.geofence ? { radiusMiles: Number(f.radiusMiles) } : null,
     artwork: f.mediaId ? { mediaId: f.mediaId } : null,
+    stockArt: f.stockArt || null,
     headline: f.headline.trim() || null,
     featured: f.featured || null,
   };
@@ -918,6 +921,13 @@ function renderOfferForm(id) {
     try {
       const res = await api('POST', '/rules/check', rule);
       const v = res.view;
+      if (v) {
+        f.autoStockArt = v.display.autoStockArt;
+        const auto = boot.stockArt.find((a) => a.id === f.autoStockArt);
+        document.querySelector('[data-auto-art-img]')?.setAttribute('src', auto?.url ?? '/stock/gift.svg');
+        const note = document.querySelector('[data-auto-art-note]');
+        if (note) note.textContent = autoArtNote(auto);
+      }
       aside.replaceChildren(
         h(
           'section',
@@ -926,7 +936,7 @@ function renderOfferForm(id) {
           h(
             'div',
             { class: 'app-card' },
-            artFrame({ imageUrl: f.mediaId ? `/media/${f.mediaId}` : null, headline: v?.display.headline ?? (f.headline || 'YOUR DEAL'), kind: v?.display.artKind ?? 'other', name: rule.name }),
+            artFrame({ imageUrl: f.mediaId ? `/media/${f.mediaId}` : null, stockArtUrl: f.mediaId ? null : v?.display.stockArt?.url, headline: v?.display.headline ?? (f.headline || 'YOUR DEAL'), kind: v?.display.artKind ?? 'other', name: rule.name }),
             h(
               'div',
               { class: 'app-card-body' },
@@ -2183,9 +2193,15 @@ const ART_W = 1200;
 const ART_H = 675;
 
 /** The 16:9 picture on an app card: the uploaded art, or the headline on a colored panel. */
-function artFrame({ imageUrl, headline, kind, name }) {
+function artFrame({ imageUrl, stockArtUrl, headline, kind, name }) {
   if (imageUrl) return h('div', { class: 'art-frame' }, h('img', { src: imageUrl, alt: name ? `${name} artwork` : 'Reward artwork', loading: 'lazy' }));
-  return h('div', { class: `art-frame poster ${kind || 'other'}` }, h('span', { class: 'poster-text' }, headline), h('img', { class: 'poster-logo', src: boot.branding.logoDataUrl || '/vgo-logo.png', alt: '' }));
+  return h(
+    'div',
+    { class: `art-frame poster ${kind || 'other'}${stockArtUrl ? ' has-pic' : ''}` },
+    h('span', { class: 'poster-text' }, headline),
+    stockArtUrl && h('img', { class: 'poster-pic', src: stockArtUrl, alt: '', loading: 'lazy' }),
+    h('img', { class: 'poster-logo', src: boot.branding.logoDataUrl || '/vgo-logo.png', alt: '' }),
+  );
 }
 
 function loadImage(file) {
@@ -2294,7 +2310,7 @@ function artSection(f, set) {
     h(
       'p',
       { class: 'note' },
-      `Every picture is resized to the same ${ART_W}×${ART_H} banner, so all rewards line up in the app. Without artwork, the app shows the headline on a colored banner.`,
+      `Every picture is resized to the same ${ART_W}×${ART_H} banner, so all rewards line up in the app. Without artwork, the app shows the headline on a colored banner with a stock picture.`,
     ),
     drop,
     file,
@@ -2329,7 +2345,29 @@ function artSection(f, set) {
         h('input', { type: 'text', maxlength: 28, value: f.headline, placeholder: 'Made from the reward, e.g. 25¢ OFF A GALLON', oninput: (e) => set({ headline: e.target.value }) }),
       ),
     ),
+    !f.mediaId && stockPicker(f, set),
     h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: f.featured, onchange: (e) => set({ featured: e.target.checked }) }), 'Feature it in the big slider at the top of the app home screen'),
+  );
+}
+
+const autoArtNote = (auto) => `Auto picks from the reward's name and items${auto ? `. Right now: ${auto.title}.` : '.'}`;
+
+/** Stock picture for rewards without artwork: Auto picks one from the reward's words. */
+function stockPicker(f, set) {
+  const auto = f.autoStockArt && boot.stockArt.find((a) => a.id === f.autoStockArt);
+  const pick = (v) => set({ stockArt: v }, true);
+  return h(
+    'div',
+    { class: 'field' },
+    h('span', {}, 'Stock picture (when there is no artwork)'),
+    h('span', { class: 'note', 'data-auto-art-note': '' }, autoArtNote(auto)),
+    h(
+      'div',
+      { class: 'stock-grid', role: 'radiogroup', 'aria-label': 'Stock picture' },
+      h('button', { type: 'button', role: 'radio', 'aria-checked': !f.stockArt, class: !f.stockArt ? 'on' : '', onclick: () => pick('') }, h('img', { src: auto?.url ?? '/stock/gift.svg', alt: '', 'data-auto-art-img': '' }), 'Auto'),
+      boot.stockArt.map((a) => h('button', { type: 'button', role: 'radio', 'aria-checked': f.stockArt === a.id, class: f.stockArt === a.id ? 'on' : '', title: a.title, onclick: () => pick(a.id) }, h('img', { src: a.url, alt: '' }), a.title)),
+      h('button', { type: 'button', role: 'radio', 'aria-checked': f.stockArt === 'none', class: `none${f.stockArt === 'none' ? ' on' : ''}`, onclick: () => pick('none') }, 'No picture'),
+    ),
   );
 }
 
