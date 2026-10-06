@@ -5,6 +5,8 @@ import { birthdayRule } from './seed.js';
 
 /** The id of the migration that brings in the real site list (seed.ts skips it for tests). */
 export const REAL_SITES_MIGRATION = '2026-10-real-sites';
+/** The site-list migrations, which test data with placeholder stores skips. */
+export const SITE_MIGRATIONS = [REAL_SITES_MIGRATION, '2026-10-site-spots', '2026-10-missed-spots'];
 
 /** VGO's sites as Krut sent them, Oct 2026: [site number, street, city, state, ZIP]. */
 export const VGO_SITES: [number, string, string, string, string?][] = [
@@ -62,6 +64,38 @@ export const SITE_SPOTS: Record<number, [number, number]> = {
   4: [34.19457, -82.188746],
   5: [34.376038, -82.346338],
 };
+
+/** The site number in a store name: "VGO #31", "VGO 31" and "vgo#031" all give 31. */
+export const siteNumber = (name: string) => {
+  const m = /^\s*VGO\s*#?\s*0*(\d+)\s*$/i.exec(name);
+  return m ? Number(m[1]) : undefined;
+};
+
+/**
+ * Fills in map spots the first pass missed: any "VGO #n" site with no spot yet, whatever its address
+ * says, and the pilot store, which is VGO #31 even if it was renamed in the portal. Spots someone set by
+ * hand are kept. Also drops a coming-soon copy of the pilot's site that was added next to it.
+ */
+export function placeMissedSites(d: ConsoleData): void {
+  const pilot = d.stores.find((s) => s.id === d.pilot.storeId);
+  const copy = d.stores.find((s) => s !== pilot && s.id === `vgo-${PILOT_SITE}` && !s.loyaltyLive);
+  if (pilot && copy && siteNumber(pilot.name) === PILOT_SITE) {
+    const used = d.members.some((m) => m.homeStoreId === copy.id) || d.ledger.some((e) => e.tx.storeId === copy.id) || d.rules.some((r) => r.scope.kind === 'stores' && r.scope.storeIds.includes(copy.id));
+    if (!used) {
+      d.stores = d.stores.filter((s) => s !== copy);
+      for (const u of d.portal?.users ?? []) u.storeIds = u.storeIds.filter((id) => id !== copy.id);
+    }
+  }
+  for (const s of d.stores) {
+    if (s.lat !== undefined) continue;
+    // Old placeholder names ("VGO 05") aren't real site numbers, so other stores need the "#".
+    const n = s === pilot ? PILOT_SITE : s.name.includes('#') ? siteNumber(s.name) : undefined;
+    const spot = n === undefined ? undefined : SITE_SPOTS[n];
+    if (!spot) continue;
+    [s.lat, s.lng] = spot;
+    delete s.mapLookupFailed;
+  }
+}
 
 /** Puts each listed site on the map at its looked-up spot, unless its address was changed since. */
 export function placeSites(d: ConsoleData): void {
@@ -146,6 +180,11 @@ const MIGRATIONS: { id: string; run: (d: ConsoleData) => void }[] = [
     // Krut, Oct 2026: real map pins for every site, looked up ahead of time.
     id: '2026-10-site-spots',
     run: placeSites,
+  },
+  {
+    // Krut, Oct 2026: VGO #31 had no pin, so it couldn't be found from the store list.
+    id: '2026-10-missed-spots',
+    run: placeMissedSites,
   },
 ];
 

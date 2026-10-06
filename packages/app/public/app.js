@@ -817,7 +817,7 @@ const storeLine = (s) => [s.address, [s.city, s.state].filter(Boolean).join(', '
 
 function storeCard(s, homeId, showOnMap) {
   const miles = milesTo(s);
-  const onMap = s.lat !== null && showOnMap;
+  const onMap = Boolean(showOnMap);
   return h(
     'article',
     {
@@ -848,7 +848,7 @@ function storeCard(s, homeId, showOnMap) {
         'div',
         { class: 'row-btns' },
         h('a', { class: 'pill-btn', href: directionsUrl(s), target: '_blank', rel: 'noopener' }, 'Directions'),
-        onMap && h('button', { class: 'pill-btn outline', onclick: () => showOnMap(s.id) }, 'Map'),
+        onMap && s.lat !== null && h('button', { class: 'pill-btn outline', onclick: () => showOnMap(s.id) }, 'Map'),
         s.phone && h('a', { class: 'pill-btn outline', href: `tel:${s.phone}` }, 'Call'),
         s.loyaltyLive && s.offers > 0 && h('a', { class: 'pill-btn outline', href: '#/offers', onclick: () => (offerStoreId = s.id) }, 'Offers'),
       ),
@@ -892,7 +892,8 @@ async function renderStores() {
   let map = null;
   function showOnMap(id) {
     const marker = markers.get(id);
-    if (!map || !marker) return;
+    if (!map) return;
+    if (!marker) return toast('This store isn’t on the map yet.');
     mapEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
     map.flyTo(marker.getLatLng(), Math.max(map.getZoom(), 15), { duration: 0.8 });
     map.once('moveend', () => marker.openPopup());
