@@ -195,3 +195,9 @@ dialog::backdrop { background: rgba(15, 39, 71, 0.45); }
   background-image: radial-gradient(circle, #fff1a8 0 3px, transparent 4px), radial-gradient(circle, #ffffff 0 2px, transparent 3px), radial-gradient(circle, #7fe3ff 0 3px, transparent 4px);
   background-size: 70px 60px, 45px 50px, 90px 80px; background-position: 0 0, 20px 15px, 40px 30px; opacity: 0.8; }
 .promo.bday { border: 2px solid var(--accent); }
+
+/* Program terms and privacy policy */
+.legal .content { gap: 6px; }
+.legal h2 { font-size: 18px; margin: 18px 0 4px; }
+.legal p, .legal li { font-size: 15px; line-height: 1.5; margin: 6px 0; }
+.legal ul { padding-left: 20px; margin: 4px 0; }

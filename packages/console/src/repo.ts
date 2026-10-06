@@ -311,6 +311,15 @@ export class Repo {
       throw new ConsoleError('Settings must be whole, non-negative numbers.');
     if (next.fuelStacking.mode === 'stack' && !(next.fuelStacking.maxCentsPerGallon > 0))
       throw new ConsoleError('Set the most cents per gallon a fill-up can get.');
+    if (next.legal) {
+      const l = Object.fromEntries(Object.entries(next.legal).map(([k, v]) => [k, String(v ?? '').trim().slice(0, 200)]).filter(([, v]) => v));
+      if (l.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(l.email)) throw new ConsoleError('The contact email doesn’t look right.');
+      if (l.governingState) {
+        if (!/^[A-Za-z]{2}$/.test(l.governingState)) throw new ConsoleError('Use the two-letter state for governing law, like SC.');
+        l.governingState = l.governingState.toUpperCase();
+      }
+      next.legal = l;
+    }
     this.data.settings = next;
     this.log(actor, `Changed program settings: ${Object.keys(patch).join(', ')}`);
     this.save();

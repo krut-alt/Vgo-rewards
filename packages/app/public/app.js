@@ -1,6 +1,7 @@
 // VGO Rewards member app: sign up, home, offers, use rewards, account.
 // Plain browser JavaScript; installable from the browser until the store apps exist.
 import { code128Svg } from './barcode.js';
+import { legalPage } from './legal.js';
 
 const root = document.getElementById('app');
 const sheet = document.getElementById('sheet');
@@ -176,7 +177,7 @@ function renderJoin() {
       err,
       h('div', { style: 'flex:1' }),
       h('button', { class: 'cta', onclick: sendCode }, s.mode === 'join' ? w.cta : 'Send my code'),
-      s.mode === 'join' && h('span', { class: 'fine' }, `${w.fine} By joining you agree to the `, h('a', { href: '#terms' }, 'program terms'), ' and ', h('a', { href: '#privacy' }, 'privacy policy'), '.'),
+      s.mode === 'join' && h('span', { class: 'fine' }, `${w.fine} By joining you agree to the `, h('a', { href: '#/terms' }, 'program terms'), ' and ', h('a', { href: '#/privacy' }, 'privacy policy'), '.'),
       h(
         'button',
         { class: 'switch-mode', onclick: () => ((s.mode = s.mode === 'join' ? 'signin' : 'join'), (s.error = null), renderJoin()) },
@@ -756,20 +757,27 @@ async function renderAccount() {
         },
         'Sign out',
       ),
-      h('p', { class: 'fine' }, h('a', { href: '#terms' }, 'Program terms'), ' · ', h('a', { href: '#privacy' }, 'Privacy policy')),
+      h('p', { class: 'fine' }, h('a', { href: '#/terms' }, 'Program terms'), ' · ', h('a', { href: '#/privacy' }, 'Privacy policy')),
     ),
   );
 }
 
 // ---------- router ----------
 
+let program = null;
+async function renderLegal(kind) {
+  program ??= await api('GET', '/program');
+  root.replaceChildren(legalPage(h, kind, program, () => (history.length > 1 ? history.back() : (location.hash = token ? '#/account' : ''))));
+}
+
 async function render() {
   if (!config) {
     config = await api('GET', '/config');
     applyBranding();
   }
-  if (!token) return renderJoin();
   const page = location.hash.replace(/^#\/?/, '') || 'home';
+  if (page === 'terms' || page === 'privacy') return renderLegal(page);
+  if (!token) return renderJoin();
   try {
     if (page === 'offers') {
       if (!here) await refreshHereIfAllowed();

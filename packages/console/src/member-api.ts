@@ -19,6 +19,8 @@ const MAX_CODES_PER_HOUR = 5;
 const SESSION_DAYS = 90;
 /** Members must be at least this old to join. */
 export const MIN_JOIN_AGE = 18;
+/** Bump when the wording of the terms or privacy pages changes. */
+export const PROGRAM_TERMS_UPDATED = '2026-10-06';
 const FOOD_DRINK = ['coffee', 'fountain', 'sandwiches', 'hot-food', 'snacks', 'candy', 'energy', 'cold-drinks', 'beer', 'ice'];
 
 import { nearestWithin, type Spot } from './geo.js';
@@ -512,6 +514,33 @@ export class MemberApi {
   }
 
   /** Public data the sign-up screen shows before anyone signs in. */
+  /**
+   * What the program terms and privacy pages say, taken from the live program: who runs it, the
+   * earn and reward rules running at every store, and how long points last.
+   */
+  programFacts() {
+    const d = this.repo.data;
+    const now = this.clock();
+    const everywhere = (r: ConsoleRule) => r.status === 'active' && r.scope.kind === 'all' && !(r.schedule?.endsAt && r.schedule.endsAt <= now.toISOString());
+    const label = (r: ConsoleRule) => rewardLabel(r).replace(/^./, (c) => c.toUpperCase());
+    return {
+      updated: PROGRAM_TERMS_UPDATED,
+      programName: d.branding.programName,
+      company: d.settings.legal?.companyName || 'VGO',
+      email: d.settings.legal?.email ?? '',
+      phone: d.settings.legal?.phone ?? '',
+      address: d.settings.legal?.address ?? '',
+      governingState: d.settings.legal?.governingState || 'SC',
+      minAge: MIN_JOIN_AGE,
+      earn: d.rules.filter((r) => r.section === 'earn' && everywhere(r) && !r.conditions.length).map(label),
+      redeem: d.rules.filter((r) => r.section === 'redeem' && everywhere(r)).map(label),
+      pointsExpireMonths: d.settings.pointsExpireMonths,
+      oneFuelDiscount: d.settings.fuelStacking.mode === 'best',
+      states: [...new Set(d.stores.map((st) => st.state))].sort(),
+      liveStores: d.stores.filter((st) => st.loyaltyLive).map((st) => st.name),
+    };
+  }
+
   config() {
     const d = this.repo.data;
     const welcome = d.rules.find((r) => r.welcome && r.status === 'active');
