@@ -112,6 +112,11 @@ export interface ProgramSettings {
   monthlyBudgetCents: number;
   /** Who runs the program, shown on the app's terms and privacy pages. */
   legal?: ProgramContact;
+  /**
+   * POS department (number or name, as the POS link sends it) to our category, for lines the
+   * items catalog does not know, e.g. { "12": "tobacco" }. Names like "Cold Drinks" match on their own.
+   */
+  posDepartments?: Record<string, string>;
 }
 
 export interface ProgramContact {

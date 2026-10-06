@@ -43,6 +43,8 @@ createApp(repo, resolve(process.env.VGO_PUBLIC ?? 'packages/console/public'), {
   memberApi,
   adminPassword,
   posKey: process.env.VGO_POS_KEY || undefined,
+  // VGO_POS_LINK picks the link vendor's wire format (packages/console/src/pos/adapters.ts).
+  posLinkAdapter: process.env.VGO_POS_LINK || undefined,
   media: upstash ? upstashMediaStore(upstash) : fileMediaStore(resolve(dirname(dataFile), 'media')),
 }).listen(port, host, () => {
   console.log(`VGO Rewards console: http://localhost:${port}   member app: http://localhost:${port}/app/   (data: ${upstash ? 'Upstash' : dataFile}, texts: ${sms.name})`);

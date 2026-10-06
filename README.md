@@ -11,7 +11,8 @@ Pilot: one unbranded Verifone Commander store, then the remaining Verifone and G
 - **Console** (`packages/console`): where the jobber manages offers, reward rules, stores and
   groups, members, branding and pilot results. Includes a plain-English rule drafter that turns
   "Earn 2x points on premium fuel on weekends at SC stores until Dec 31" into a paused rule.
-  The POS link calls `POST /api/pos/preview` before payment and `POST /api/pos/transactions` after.
+  The POS link calls `/api/pos/link/identify`, `rewards`, `finalize` and `cancel`, through an adapter
+  for the chosen vendor's format; see [docs/pos-link.md](docs/pos-link.md).
 - **Customer app** (`packages/app`, served at `/app/`): members join with their phone number
   and a texted code, then see points, punch cards and offers, add offers to their card, pick a
   points reward for their next fill-up, and show their phone number or barcode at checkout.

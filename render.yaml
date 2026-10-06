@@ -30,3 +30,6 @@ services:
       # What the POS link signs its calls with. Set it when the link vendor is connected.
       - key: VGO_POS_KEY
         sync: false
+      # Which link vendor's message format /api/pos/link speaks. Leave empty for our own ("vgo").
+      - key: VGO_POS_LINK
+        sync: false

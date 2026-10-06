@@ -21,6 +21,8 @@ import {
 import type { ConsoleData, ConsoleRule, ConsoleStore, PortalUser } from './model.js';
 import { MemberApi, offerKind, promoHeadline } from './member-api.js';
 import { PortalAuthService, type SignedIn } from './portal-auth.js';
+import { adapterFor } from './pos/adapters.js';
+import { PosLink } from './pos/link.js';
 import { PRESETS } from './presets.js';
 import { ConsoleError, Repo, withoutNulls, type RuleInput } from './repo.js';
 import { spotFrom } from './geo.js';
@@ -101,6 +103,8 @@ export interface AppOptions {
   adminPassword?: string;
   /** Key the POS link sends as `Authorization: Bearer <key>` to reach /api/pos. */
   posKey?: string;
+  /** Which vendor's wire format /api/pos/link speaks (pos/adapters.ts). Defaults to our own, `vgo`. */
+  posLinkAdapter?: string;
   /** Where reward artwork is kept. Defaults to memory (tests and local tries). */
   media?: MediaStore;
 }
@@ -139,6 +143,8 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
   // Recently shown artwork, so the app doesn't fetch the same image from storage on every view.
   const mediaCache = new Map<string, Buffer>();
   const portal = opts.adminPassword ? new PortalAuthService(repo, opts.adminPassword, clock) : undefined;
+  const posLink = new PosLink(repo, clock);
+  const posAdapter = adapterFor(opts.posLinkAdapter);
   // Without a portal password (local development) everyone is the master admin.
   const OPEN: SignedIn = { actor: ADMIN, user: { id: 'master', name: 'Jobber admin', email: 'admin', role: 'admin', storeIds: [] } };
 
@@ -348,6 +354,14 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
     // What the POS link calls. `preview` answers "what does this member get" before payment;
     // `transactions` records the finished sale. The member is given either as our `memberId` or as
     // `loyaltyId`: the phone number typed on the PIN pad or the scanned app barcode.
+    // The certified POS link (see pos/link.ts), through the adapter for the chosen vendor.
+    if (method === 'POST' && (match = m(/^\/pos\/link\/(\w+)$/))) {
+      return [200, posAdapter.write(posLink.handle(posAdapter.read(match[1]!, await body(req))))];
+    }
+    if (method === 'GET' && path === '/pos/feed') {
+      const limit = url.searchParams.get('limit');
+      return [200, posLink.feed({ after: url.searchParams.get('after') ?? undefined, siteId: url.searchParams.get('siteId') ?? undefined, limit: limit ? Number(limit) : undefined })];
+    }
     if (method === 'POST' && (path === '/pos/preview' || path === '/pos/transactions')) {
       const { tx, memberId, loyaltyId } = await body<{ tx: Transaction; memberId?: string; loyaltyId?: string }>(req);
       const id = memberId || (loyaltyId ? repo.memberByLoyaltyId(loyaltyId).id : undefined);

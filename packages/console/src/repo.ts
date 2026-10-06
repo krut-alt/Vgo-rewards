@@ -392,12 +392,20 @@ export class Repo {
     });
   }
 
-  /** Applies a finished transaction: earns and spends points, moves punch cards and records it. */
-  recordTransaction(tx: Transaction, memberId?: string, opts: { sample?: boolean; save?: boolean } = {}): EvaluationResult {
+  /**
+   * Applies a finished transaction: earns and spends points, moves punch cards and records it.
+   * `applied` is what the POS link says it actually gave, by rule: discounts it did not apply are
+   * dropped (with their points cost), and its cents replace ours. Earn rules always count.
+   */
+  recordTransaction(
+    tx: Transaction,
+    memberId?: string,
+    opts: { sample?: boolean; save?: boolean; applied?: { ruleId: string; centsOff?: number }[] } = {},
+  ): EvaluationResult {
     const store = this.store(tx.storeId);
     if (!store.loyaltyLive && memberId) throw new ConsoleError(`Loyalty is not live at ${store.name} yet.`, 409);
     if (this.data.ledger.some((e) => e.tx.id === tx.id)) throw new ConsoleError('Transaction already recorded.', 409);
-    const result = this.preview(tx, memberId);
+    const result = opts.applied ? onlyApplied(this.preview(tx, memberId), opts.applied, this.data.rules) : this.preview(tx, memberId);
     if (memberId) {
       const m = this.member(memberId);
       m.pointsBalance += result.pointsEarned - result.pointsSpent;
@@ -431,4 +439,28 @@ export class Repo {
     this.log(actor, 'Cleared sample data');
     this.save();
   }
+}
+
+/** Keeps only the discounts the POS applied. A declined free punch-card item leaves that card as it was. */
+function onlyApplied(result: EvaluationResult, applied: { ruleId: string; centsOff?: number }[], rules: ConsoleRule[]): EvaluationResult {
+  const given = new Map(applied.map((a) => [a.ruleId, a.centsOff]));
+  const dropped = result.discounts.filter((d) => !given.has(d.ruleId));
+  const droppedIds = new Set(dropped.map((d) => d.ruleId));
+  const punches = { ...result.punches };
+  for (const d of dropped) {
+    const effect = rules.find((r) => r.id === d.ruleId)?.effect;
+    if (d.kind === 'punch' && effect?.type === 'punchCard') delete punches[effect.cardId];
+  }
+  return {
+    pointsEarned: result.pointsEarned,
+    pointsSpent: result.pointsSpent - dropped.reduce((s, d) => s + (d.pointsSpent ?? 0), 0),
+    discounts: result.discounts
+      .filter((d) => !droppedIds.has(d.ruleId))
+      .map((d) => {
+        const cents = given.get(d.ruleId);
+        return cents === undefined ? d : { ...d, centsOff: Math.max(0, Math.round(cents)) };
+      }),
+    punches,
+    appliedRuleIds: result.appliedRuleIds.filter((id) => !droppedIds.has(id)),
+  };
 }
