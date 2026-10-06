@@ -33,6 +33,47 @@ export const VGO_SITES: [number, string, string, string, string?][] = [
 /** The pilot store, the only one live for now. */
 export const PILOT_SITE = 31;
 
+/**
+ * Map spots for the sites above, looked up once from the U.S. Census address geocoder (and
+ * OpenStreetMap where Census had no match), so the app's map doesn't depend on a live lookup.
+ * #15 is listed as Easley but its postal city is Liberty; #32 matched 501 N Harper Street. #31 has
+ * no street number, so its spot is on W. Georgia Road; #33 is the Mauldin Rd and Fairforest Way corner.
+ */
+export const SITE_SPOTS: Record<number, [number, number]> = {
+  25: [34.84359, -82.311589],
+  28: [35.091109, -79.010642],
+  29: [34.844683, -82.365142],
+  12: [34.748322, -82.660995],
+  16: [32.785568, -79.979272],
+  22: [32.82161, -80.036283],
+  24: [32.989864, -80.039782],
+  2: [34.794059, -82.380493],
+  7: [34.893417, -82.431896],
+  15: [34.81098, -82.650777],
+  14: [34.888519, -82.709946],
+  21: [32.784938, -80.002084],
+  3: [34.751858, -82.217091],
+  11: [34.87525, -82.442245],
+  13: [34.27639, -80.562072],
+  1: [34.757116, -82.473679],
+  31: [34.737208, -82.27645],
+  33: [34.785585, -82.351806],
+  32: [34.506544, -82.008809],
+  4: [34.19457, -82.188746],
+  5: [34.376038, -82.346338],
+};
+
+/** Puts each listed site on the map at its looked-up spot, unless its address was changed since. */
+export function placeSites(d: ConsoleData): void {
+  for (const [n, address, city, state] of VGO_SITES) {
+    const spot = SITE_SPOTS[n];
+    const s = d.stores.find((x) => x.name.replace(/\s+/g, '') === `VGO#${n}`);
+    if (!spot || !s || s.address !== address || s.city !== city || s.state !== state) continue;
+    [s.lat, s.lng] = spot;
+    delete s.mapLookupFailed;
+  }
+}
+
 const isPlaceholder = (s: ConsoleStore) => /^VGO \d\d$/.test(s.name) && !s.city && !s.address;
 
 /**
@@ -65,7 +106,8 @@ export function useRealSites(d: ConsoleData): void {
     let id = `vgo-${n}`;
     for (let k = 2; d.stores.some((s) => s.id === id); k++) id = `vgo-${n}-${k}`;
     const group = d.groups.find((g) => g.id === state.toLowerCase());
-    d.stores.push({ id, name, address, city, state, ...(zip ? { zip } : {}), groupIds: group ? [group.id] : [], pos: 'other', loyaltyLive: false, mappedCategories: [] });
+    const spot = SITE_SPOTS[n];
+    d.stores.push({ id, name, address, city, state, ...(zip ? { zip } : {}), ...(spot ? { lat: spot[0], lng: spot[1] } : {}), groupIds: group ? [group.id] : [], pos: 'other', loyaltyLive: false, mappedCategories: [] });
   }
 }
 
@@ -99,6 +141,11 @@ const MIGRATIONS: { id: string; run: (d: ConsoleData) => void }[] = [
     // Krut, Oct 2026: the real site list. VGO #31 stays live; the rest show as coming soon.
     id: REAL_SITES_MIGRATION,
     run: useRealSites,
+  },
+  {
+    // Krut, Oct 2026: real map pins for every site, looked up ahead of time.
+    id: '2026-10-site-spots',
+    run: placeSites,
   },
 ];
 

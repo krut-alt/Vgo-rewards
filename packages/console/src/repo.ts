@@ -195,6 +195,12 @@ export class Repo {
       store.phone = store.phone.replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
       if (store.phone.length !== 10) throw new ConsoleError('Enter a 10-digit phone number.');
     }
+    // A new address with the old map spot left in place gets looked up again.
+    const was = this.data.stores.find((s) => s.id === store.id);
+    if (was && store.lat === was.lat && store.lng === was.lng && (['address', 'city', 'state', 'zip'] as const).some((k) => (store[k] ?? '') !== (was[k] ?? ''))) {
+      delete store.lat;
+      delete store.lng;
+    }
     if ((store.lat === undefined) !== (store.lng === undefined)) throw new ConsoleError('Enter both latitude and longitude, or neither.');
     if (store.lat !== undefined && (!Number.isFinite(store.lat) || Math.abs(store.lat) > 90 || !Number.isFinite(store.lng) || Math.abs(store.lng!) > 180))
       throw new ConsoleError('That map location doesn’t look right. Use decimal latitude and longitude, like 34.85, -82.39.');

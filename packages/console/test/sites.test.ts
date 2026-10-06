@@ -3,7 +3,7 @@ import type { Server } from 'node:http';
 import { afterAll, describe, expect, it } from 'vitest';
 import { storeSpotFiller } from '../src/geocode.js';
 import { MemberApi } from '../src/member-api.js';
-import { PILOT_SITE, useRealSites, VGO_SITES } from '../src/migrate.js';
+import { PILOT_SITE, placeSites, SITE_SPOTS, useRealSites, VGO_SITES } from '../src/migrate.js';
 import { Repo } from '../src/repo.js';
 import { ADMIN, seedData } from '../src/seed.js';
 import { createApp } from '../src/server.js';
@@ -34,6 +34,32 @@ describe('real VGO sites', () => {
     // Running it again changes nothing.
     useRealSites(d);
     expect(d.stores).toHaveLength(VGO_SITES.length);
+  });
+
+  it('puts every site on the map at its looked-up spot', () => {
+    const d = fresh().data;
+    useRealSites(d);
+    placeSites(d);
+    for (const [n] of VGO_SITES) {
+      const s = d.stores.find((x) => x.name === `VGO #${n}`)!;
+      if (!SITE_SPOTS[n]) continue;
+      expect([s.lat, s.lng]).toEqual(SITE_SPOTS[n]);
+      // Every spot is in the Carolinas.
+      expect(s.lat).toBeGreaterThan(32);
+      expect(s.lat).toBeLessThan(36.6);
+      expect(s.lng).toBeGreaterThan(-84);
+      expect(s.lng).toBeLessThan(-78);
+    }
+    expect(d.stores.find((s) => s.name === 'VGO #25')).toMatchObject({ lat: 34.84359, lng: -82.311589 });
+  });
+
+  it('leaves a site alone when its address was changed in the portal', () => {
+    const d = fresh().data;
+    useRealSites(d);
+    const s = d.stores.find((x) => x.name === 'VGO #25')!;
+    Object.assign(s, { address: '1 New Street', lat: 34.9, lng: -82.4 });
+    placeSites(d);
+    expect([s.lat, s.lng]).toEqual([34.9, -82.4]);
   });
 
   it('keeps placeholders the portal already edited', () => {
@@ -70,6 +96,7 @@ describe('map spots from addresses', () => {
   it('fills missing spots, remembers misses, and retries when the address changes', async () => {
     const repo = fresh();
     useRealSites(repo.data);
+    for (const s of repo.data.stores) delete s.lat, delete s.lng;
     const asked: string[] = [];
     const fill = storeSpotFiller(
       repo,
@@ -94,9 +121,20 @@ describe('map spots from addresses', () => {
     expect(repo.data.stores.find((s) => s.name === 'VGO #33')).toMatchObject({ lat: 34.8 });
   });
 
+  it('drops the old spot when an address changes, so the new one is looked up', () => {
+    const repo = fresh();
+    useRealSites(repo.data);
+    const s25 = repo.data.stores.find((s) => s.name === 'VGO #25')!;
+    expect(repo.upsertStore({ ...s25, tagline: 'Hot coffee' }, ADMIN).lat).toBe(34.84359);
+    const moved = repo.upsertStore({ ...s25, address: '500 Roper Mountain Road' }, ADMIN);
+    expect(moved.lat).toBeUndefined();
+    expect(repo.upsertStore({ ...moved, address: '501 Roper Mountain Road', lat: 34.85, lng: -82.31 }, ADMIN).lat).toBe(34.85);
+  });
+
   it('runs a lookup pass when the server starts and after a store is saved', async () => {
     const repo = fresh();
     useRealSites(repo.data);
+    for (const s of repo.data.stores) delete s.lat, delete s.lng;
     const asked: string[] = [];
     const server: Server = createApp(repo, 'packages/console/public', { clock: () => now, geocoder: async (a) => (asked.push(a), { lat: 34, lng: -82 }) }).listen(0);
     afterAll(() => server.close());
