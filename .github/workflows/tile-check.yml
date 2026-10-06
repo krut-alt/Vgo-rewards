@@ -1,0 +1,18 @@
+name: Tile check (one-off)
+on:
+  push:
+    branches: [claude/project-thread-kyep9v]
+    paths: [.github/workflows/tile-check.yml]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          for u in \
+            "https://a.basemaps.cartocdn.com/rastertiles/voyager/12/1112/1626.png" \
+            "https://tile.openstreetmap.org/12/1112/1626.png" \
+            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/12/1626/1112" ; do
+            echo "== $u"
+            curl -s -o /tmp/t -w "status %{http_code} type %{content_type} size %{size_download}\n" -H "Referer: https://vgo-rewards.onrender.com/app/" -A "Mozilla/5.0" "$u"
+            file /tmp/t; head -c 200 /tmp/t | strings | head -3
+          done
