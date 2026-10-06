@@ -64,7 +64,15 @@ export function conditionPasses(c: Condition, tx: Transaction, member: Member): 
       return member.visitCount === 0;
     case 'birthday':
       return tx.localDate !== undefined && member.birthday !== undefined && inBirthdayWindow(member.birthday, tx.localDate, c.window);
+    case 'minAge':
+      return tx.localDate !== undefined && member.birthDate !== undefined && ageOn(member.birthDate, tx.localDate) >= c.years;
   }
+}
+
+/** Whole years old on `ymd` for someone born on `birthDate` (both YYYY-MM-DD). */
+export function ageOn(birthDate: string, ymd: string): number {
+  const years = Number(ymd.slice(0, 4)) - Number(birthDate.slice(0, 4));
+  return ymd.slice(5) < birthDate.slice(5) ? years - 1 : years;
 }
 
 /** Whether `ymd` falls in the member's birthday window. Feb 29 birthdays count as Feb 28 in other years. */

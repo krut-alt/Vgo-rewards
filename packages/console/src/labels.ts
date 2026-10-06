@@ -156,11 +156,19 @@ export function conditionLabel(c: Condition): string {
       return 'First visit';
     case 'birthday':
       return c.window === 'day' ? 'On their birthday' : c.window === 'week' ? 'Birthday week' : 'Birthday month';
+    case 'minAge':
+      return `Members ${c.years}+ only`;
   }
 }
 
 /** The sentence under the offer name in the app, when the rule has none written. */
 export function memberLine(rule: ConsoleRule): string {
+  const age = rule.conditions.find((c) => c.type === 'minAge');
+  const line = memberLineBody({ ...rule, conditions: rule.conditions.filter((c) => c !== age) });
+  return age ? `${line} ${age.years}+ only. ID checked at the register.` : line;
+}
+
+function memberLineBody(rule: ConsoleRule): string {
   if (rule.memberText) return rule.memberText;
   const conds = rule.conditions.map(conditionLabel);
   const e = rule.effect;

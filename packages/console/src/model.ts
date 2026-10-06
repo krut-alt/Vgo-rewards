@@ -78,8 +78,10 @@ export interface ConsoleMember {
   /** When the member last turned offer texts or emails on, kept as proof of consent. */
   smsOptInAt?: string;
   emailOptInAt?: string;
-  /** Month and day only (MM-DD), for birthday rewards. */
+  /** Month and day only (MM-DD), for birthday rewards. Kept in step with `birthDate`. */
   birthday?: string;
+  /** Full date of birth (YYYY-MM-DD), asked at sign-up: members must be 18+, some offers 21+. */
+  birthDate?: string;
   zip?: string;
   /** Agreed to offer texts at sign-up; can be changed in the app. */
   smsOptIn?: boolean;

@@ -80,13 +80,14 @@ describe('reward artwork', () => {
 });
 
 describe('member profile', () => {
-  it('keeps birthday, ZIP and when they agreed to offers', () => {
+  it('keeps date of birth, ZIP and when they agreed to offers', () => {
     const m = repo.createMember({ name: 'Bea', phone: '8035550556', homeStoreId: 'vgo-01' }, { role: 'jobber-admin', userId: 't' });
-    members.updateAccount(m, { birthday: '3-7', zip: '29601', smsOptIn: true });
-    expect(m).toMatchObject({ birthday: '03-07', zip: '29601', smsOptIn: true, smsOptInAt: now.toISOString() });
-    expect(() => members.updateAccount(m, { birthday: '02-30' })).toThrow(/birthday/);
+    members.updateAccount(m, { birthDate: '03/07/1992', zip: '29601', smsOptIn: true });
+    expect(m).toMatchObject({ birthDate: '1992-03-07', birthday: '03-07', zip: '29601', smsOptIn: true, smsOptInAt: now.toISOString() });
+    expect(() => members.updateAccount(m, { birthDate: '1992-03-08' })).toThrow(/Ask the store/);
+    members.updateAccount(m, { birthDate: '1992-03-07' }); // unchanged is fine
     expect(() => members.updateAccount(m, { zip: '123' })).toThrow(/ZIP/);
-    members.updateAccount(m, { birthday: '', zip: '' });
-    expect(m.birthday).toBeUndefined();
+    members.updateAccount(m, { zip: '' });
+    expect(m.zip).toBeUndefined();
   });
 });

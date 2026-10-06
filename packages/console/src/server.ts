@@ -263,6 +263,16 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
       return [200, repo.adjustPoints(match[1]!, Number(delta), String(reason ?? ''), actor)];
     }
 
+    if (method === 'PUT' && (match = m(/^\/members\/([\w-]+)\/birth-date$/))) {
+      // Members set their date of birth once; a store fixes it after checking ID.
+      const { birthDate } = await body<{ birthDate?: string }>(req);
+      if (!memberVisible(match[1]!)) throw new ConsoleError('Member not found.', 404);
+      const member = repo.member(match[1]!);
+      members.setBirthDate(member, birthDate);
+      repo.note(actor, `Changed the date of birth for ${member.name}`);
+      return [200, member];
+    }
+
     if (method === 'PUT' && path === '/settings') return [200, repo.updateSettings(await body(req), actor)];
     if (method === 'PUT' && path === '/branding') return [200, repo.updateBranding(await body(req), actor)];
     if (method === 'GET' && path === '/results') {
@@ -352,13 +362,14 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
       return [200, await members.requestCode(phone)];
     }
     if (method === 'POST' && path === '/verify') {
-      const { phone, code, firstName, smsOptIn, homeStoreId, email, emailOptIn } = await body<Record<string, string | boolean | undefined>>(req);
+      const { phone, code, firstName, smsOptIn, homeStoreId, email, emailOptIn, birthDate } = await body<Record<string, string | boolean | undefined>>(req);
       const result = members.verify(phone, code, {
         firstName: firstName as string,
         smsOptIn: Boolean(smsOptIn),
         homeStoreId: homeStoreId as string,
         email: email as string,
         emailOptIn: Boolean(emailOptIn),
+        birthDate: birthDate as string,
       });
       return [200, result];
     }

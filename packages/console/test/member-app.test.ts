@@ -15,7 +15,7 @@ function setup() {
 
 async function join(api: MemberApi, codeFrom: () => string, phone = '8035550199') {
   await api.requestCode(phone);
-  const res = api.verify(phone, codeFrom(), { firstName: 'Jordan', smsOptIn: true, homeStoreId: 'vgo-01' });
+  const res = api.verify(phone, codeFrom(), { firstName: 'Jordan', smsOptIn: true, homeStoreId: 'vgo-01', birthDate: '1990-04-15' });
   if (!('token' in res)) throw new Error('expected a token');
   return api.memberFor(`Bearer ${res.token}`);
 }
@@ -52,7 +52,7 @@ describe('member sign-in', () => {
   it('refuses unknown or signed-out tokens', async () => {
     const { api, codeFrom } = setup();
     await api.requestCode('8035550103');
-    const res = api.verify('8035550103', codeFrom(), { firstName: 'Sam' }) as { token: string };
+    const res = api.verify('8035550103', codeFrom(), { firstName: 'Sam', birthDate: '1985-01-02' }) as { token: string };
     expect(() => api.memberFor('Bearer nope')).toThrow(/sign in/);
     api.signOut(`Bearer ${res.token}`);
     expect(() => api.memberFor(`Bearer ${res.token}`)).toThrow(/sign in/);

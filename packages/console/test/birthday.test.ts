@@ -31,9 +31,9 @@ describe('birthday reward', () => {
   it('nudges for a birthday, then shows when it unlocks, then is ready in the window', () => {
     const { api, m } = setup();
     expect(api.home(m).birthday).toMatchObject({ state: 'add-birthday' });
-    api.updateAccount(m, { birthday: '12-01' });
+    api.updateAccount(m, { birthDate: '1990-12-01' });
     expect(api.home(m).birthday).toMatchObject({ state: 'coming', on: 'the week of Dec 1' });
-    api.updateAccount(m, { birthday: '10-02' });
+    api.setBirthDate(m, '1990-10-02');
     const ready = api.home(m).birthday as { state: string; offer: { ruleId: string; line: string } };
     expect(ready.state).toBe('ready');
     expect(ready.offer.line).toBe('Happy birthday! Use it any visit in your birthday week.');

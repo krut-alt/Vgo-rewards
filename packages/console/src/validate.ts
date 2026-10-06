@@ -1,7 +1,10 @@
-import { isStockArtId } from './stock-art.js';
 // Runtime checks for rules arriving from the console or API, so a bad rule never reaches a POS.
 import type { Condition, Effect, Scope } from '../../engine/src/index.js';
 import type { ConsoleRule } from './model.js';
+import { isStockArtId } from './stock-art.js';
+
+/** Categories only shown to members 21 and over. */
+export const AGE_21 = ['beer', 'tobacco'];
 
 const isInt = (n: unknown, min = 0): n is number => typeof n === 'number' && Number.isInteger(n) && n >= min;
 const isNum = (n: unknown, min = 0): n is number => typeof n === 'number' && Number.isFinite(n) && n >= min;
@@ -86,6 +89,8 @@ function conditionProblems(c: Condition): string[] {
       return [];
     case 'birthday':
       return ['day', 'week', 'month'].includes(c.window) ? [] : ['Choose the birthday window.'];
+    case 'minAge':
+      return Number.isInteger(c.years) && c.years >= 18 && c.years <= 99 ? [] : ['Set the minimum age between 18 and 99.'];
     default:
       return ['Unknown qualifier.'];
   }
@@ -118,6 +123,9 @@ export function ruleProblems(rule: Partial<ConsoleRule>, storeIds: string[], gro
   if (rule.headline !== undefined && (typeof rule.headline !== 'string' || rule.headline.length > 28)) p.push('Keep the promo headline to 28 characters.');
   if (rule.artwork !== undefined && (!rule.artwork || typeof rule.artwork.mediaId !== 'string')) p.push('Artwork is not valid.');
   if (rule.stockArt !== undefined && rule.stockArt !== 'none' && !isStockArtId(rule.stockArt)) p.push('That stock picture is not in the catalog.');
+  const ageCats = [...(rule.effect && 'categories' in rule.effect ? (rule.effect.categories ?? []) : []), ...(rule.conditions ?? []).flatMap((c) => (c.type === 'hasItem' ? (c.categories ?? []) : []))];
+  const minAge = rule.conditions?.find((c) => c.type === 'minAge');
+  if (ageCats.some((c) => AGE_21.includes(c)) && !(minAge && minAge.type === 'minAge' && minAge.years >= 21)) p.push('Alcohol and tobacco offers must be set to members 21+ only.');
   if (rule.featured !== undefined && typeof rule.featured !== 'boolean') p.push('Featured setting is not valid.');
   const g = rule.geofence;
   if (g !== undefined) {

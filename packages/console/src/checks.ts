@@ -29,6 +29,9 @@ export function ruleChecks(repo: Repo, rule: ConsoleRule, actor: Actor): { block
     );
   }
 
+  const age = rule.conditions.find((c) => c.type === 'minAge');
+  if (age) checks.push({ ok: true, text: `${age.years}+ only: hidden in the app from younger members and anyone without a date of birth on file. The cashier still checks ID.` });
+
   if (rule.fundedBy === 'store' || rule.fundedBy === 'split') {
     const off = e.type === 'itemDiscount' ? (e.centsOff ?? 0) : e.type === 'basketDiscount' ? e.centsOff : 0;
     if (off && settings.maxStoreDiscountCents > 0)
