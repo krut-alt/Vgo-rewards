@@ -57,6 +57,8 @@ function rules(today: string, pilotStart: string): ConsoleRule[] {
       id: 'earn-inside',
       name: 'Points on inside purchases',
       section: 'earn',
+      // The site pays for the points it issues inside, and is credited when points are redeemed there.
+      fundedBy: 'store',
       status: 'active',
       scope: { kind: 'all' },
       effect: { type: 'pointsPerDollar', points: 1, excludeCategories: NO_EARN_CATEGORIES },

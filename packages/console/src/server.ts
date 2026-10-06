@@ -34,6 +34,7 @@ import { addItemUpload, ALL_STORES, catalogFor, clearStoreItems, everyItem, pars
 import { computeResults } from './results.js';
 import { ADMIN } from './seed.js';
 import { SkuposSync, type SkuposFeed } from './skupos.js';
+import { closeMonths, PERIOD_KINDS, recloseMonth, statementCsv, statementFor, type PeriodKind } from './statements.js';
 import { STOCK_ART, pickStockArt, stockArtFor, stockArtUrl } from './stock-art.js';
 
 const TYPES: Record<string, string> = {
@@ -117,6 +118,8 @@ export interface AppOptions {
   skuposFeed?: SkuposFeed;
   /** Runs the Skupos update once a day on its own (at start-up, hourly checks and on portal use). Off in tests. */
   skuposDaily?: boolean;
+  /** Closes each month's site statements on their own (hourly checks and on portal use). Off in tests. */
+  autoClose?: boolean;
 }
 
 const COOKIE = 'vgo_portal';
@@ -164,6 +167,19 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
     skuposDaily();
     setInterval(skuposDaily, 60 * 60 * 1000).unref();
   }
+  // Each month's statements freeze on the 2nd of the next month, checked hourly and on portal use (free hosts sleep).
+  const closeDue = () => {
+    const started = Boolean(repo.data.statementsSince);
+    const closed = closeMonths(repo.data, clock());
+    if (!started) repo.save();
+    if (!closed.length) return;
+    repo.note({ role: 'jobber-admin', userId: 'statements' }, `Closed site statements for ${closed.join(', ')}`);
+    repo.save();
+  };
+  if (opts.autoClose) {
+    closeDue();
+    setInterval(closeDue, 60 * 60 * 1000).unref();
+  }
   // Without a portal password (local development) everyone is the master admin.
   const OPEN: SignedIn = { actor: ADMIN, user: { id: 'master', name: 'Jobber admin', email: 'admin', role: 'admin', storeIds: [] } };
 
@@ -188,6 +204,7 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
     let match: RegExpExecArray | null;
 
     if (opts.skuposDaily) skuposDaily();
+    if (opts.autoClose) closeDue();
     if (method === 'GET' && path === '/me') return [200, { user: who.user, signInRequired: Boolean(portal) }];
 
     if (method === 'GET' && path === '/bootstrap') {
@@ -333,6 +350,26 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
     if (method === 'GET' && path === '/results') {
       const view = url.searchParams.get('view') === 'all' ? 'all' : 'pilot';
       return [200, computeResults(repo.data, mine ? 'all' : view, clock(), mine)];
+    }
+    // Site statements: any period; months close and freeze on their own. Store users see only their sites.
+    if (method === 'GET' && (path === '/statements' || path === '/statements/csv')) {
+      const kind = (url.searchParams.get('period') ?? 'month') as PeriodKind;
+      if (!PERIOD_KINDS.includes(kind)) throw new ConsoleError('Pick day, week, month, quarter or year.');
+      const date = url.searchParams.get('date') || localParts(clock()).ymd;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new ConsoleError('Dates look like 2026-10-01.');
+      const st = statementFor(repo.data, kind, date, mine);
+      if (path === '/statements') return [200, st];
+      const fileName = `vgo-statements-${kind}-${st.period.start}.csv`;
+      return [200, { fileName, csv: statementCsv(st) }];
+    }
+    if (method === 'POST' && (match = m(/^\/statements\/(\d{4}-\d{2})\/reclose$/))) {
+      adminOnly();
+      const month = match[1]!;
+      if (!repo.data.closedMonths?.some((c) => c.month === month)) throw new ConsoleError('That month isn’t closed yet.', 404);
+      recloseMonth(repo.data, month, clock());
+      repo.note(actor, `Closed the ${month} statements again with current numbers`);
+      repo.save();
+      return [200, statementFor(repo.data, 'month', `${month}-01`)];
     }
     if (method === 'GET' && path === '/history') {
       adminOnly();

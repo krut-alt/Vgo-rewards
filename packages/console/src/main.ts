@@ -54,6 +54,7 @@ createApp(repo, resolve(process.env.VGO_PUBLIC ?? 'packages/console/public'), {
   // current list is read; without it the last list uploaded on the portal's Skupos page is used.
   skuposFeed: skuposFeedFromEnv(),
   skuposDaily: true,
+  autoClose: true,
 }).listen(port, host, () => {
   console.log(`VGO Rewards console: http://localhost:${port}   member app: http://localhost:${port}/app/   (data: ${upstash ? 'Upstash' : dataFile}, texts: ${sms.name})`);
 });

@@ -817,7 +817,7 @@ function renderOfferForm(id) {
           !isAdmin() && h('p', { class: 'note' }, 'Your store pays for offers you create. They run on top of the corporate program.'),
           isAdmin() &&
           field(
-            'Who pays for the discount',
+            f.section === 'earn' ? 'Who pays for the points (the site is charged per point when it is the store)' : 'Who pays for the discount',
             pills('fundedBy', [
               { label: 'Jobber', value: 'jobber' },
               { label: 'Store', value: 'store' },
@@ -1150,7 +1150,7 @@ function ruleRow(rule) {
     ),
     // Each word chunk gets its own span so flex gaps space them.
     h('div', { class: 'sentence' }, [sentenceFor(rule)].flat(Infinity).map((x) => (typeof x === 'string' ? h('span', {}, x) : x))),
-    h('span', { class: 'target' }, rule.display.target, rule.display.runs !== 'Always on' ? ` · ${rule.display.runs}` : ''),
+    h('span', { class: 'target' }, rule.display.target, rule.display.runs !== 'Always on' ? ` · ${rule.display.runs}` : '', ` · Paid by: ${rule.display.funded}`),
     h('a', { href: `#/offers/${rule.id}` }, 'Edit'),
   );
 }
@@ -1256,7 +1256,7 @@ function drafterSection() {
 }
 
 const TEMPLATES = [
-  { label: 'Earn points per $1 inside', section: 'earn', name: 'Points on inside purchases', effect: { type: 'pointsPerDollar', points: 1, excludeCategories: ['tobacco', 'lottery', 'gift-cards'] }, stackingGroup: 'earn-dollar' },
+  { label: 'Earn points per $1 inside', section: 'earn', name: 'Points on inside purchases', fundedBy: 'store', effect: { type: 'pointsPerDollar', points: 1, excludeCategories: ['tobacco', 'lottery', 'gift-cards'] }, stackingGroup: 'earn-dollar' },
   { label: 'Earn points per gallon', section: 'earn', name: 'Points on fuel', effect: { type: 'pointsPerGallon', points: 1 }, stackingGroup: 'earn-gallon' },
   { label: 'Bonus multiplier on a fuel grade', section: 'earn', name: '2x points on premium', effect: { type: 'pointsPerGallon', points: 2 }, conditions: [{ type: 'fuelGrade', grades: ['premium'] }], schedule: { daysOfWeek: [0, 6] }, stackingGroup: 'earn-gallon' },
   { label: 'Points for cents off fuel', section: 'redeem', name: '100 points = 10¢/gal', effect: { type: 'fuelDiscount', centsPerGallon: 10, maxGallons: 20, costPoints: 100 } },
@@ -1669,6 +1669,34 @@ function storeDialog(store, draft) {
       ),
     ),
     h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: s.loyaltyLive, onchange: (e) => (s.loyaltyLive = e.target.checked) }), 'Live on the rewards network (POS connected and tested). Offline stores show in the app as coming soon.'),
+    h('h3', { class: 'dialog-section' }, 'Statements'),
+    h('p', { class: 'note' }, 'Dealer sites are billed a monthly network fee and the points they issue inside, and are credited for rewards redeemed there. Corporate sites get the same numbers for your books, with nothing billed.'),
+    h(
+      'div',
+      { class: 'grid2' },
+      field(
+        'Site type',
+        h(
+          'select',
+          { onchange: (e) => (s.siteType = e.target.value) },
+          [
+            ['', 'Not set (treated as corporate)'],
+            ['corporate', 'Corporate: we own and operate it'],
+            ['dealer', 'Dealer: we supply fuel only'],
+          ].map(([v, l]) => h('option', { value: v, selected: (s.siteType ?? '') === v }, l)),
+        ),
+      ),
+      field(
+        'Monthly network fee (dealers)',
+        h('input', {
+          inputmode: 'decimal',
+          value: s.feeText ?? (s.networkFeeCents !== undefined && s.networkFeeCents !== null ? (s.networkFeeCents / 100).toFixed(2) : ''),
+          placeholder: `Default: ${money(boot.settings.networkFeeCents ?? 0)}`,
+          oninput: (e) => (s.feeText = e.target.value),
+        }),
+        'Leave blank to use the default fee, set on Statements.',
+      ),
+    ),
     h('h3', { class: 'dialog-section' }, 'Skupos'),
     h(
       'label',
@@ -1755,6 +1783,13 @@ function storeDialog(store, draft) {
                 throw Object.assign(new Error(msg), { problems: [msg] });
               }
               delete body.fuelPrices;
+              if (body.feeText !== undefined) {
+                const t = body.feeText.trim();
+                if (t && !/^\$?\d+(\.\d{1,2})?$/.test(t)) throw Object.assign(new Error('Enter the network fee in dollars, like 150.00.'), { problems: ['Enter the network fee in dollars, like 150.00.'] });
+                body.networkFeeCents = t ? dollarsToCents(t) : null;
+                delete body.feeText;
+              }
+              if (!body.siteType) body.siteType = null;
               for (const k of ['address', 'zip', 'contactName', 'email', 'phone', 'posSiteId', 'skuposStoreId', 'tagline', 'hours', 'photoMediaId']) if (!String(body[k] ?? '').trim()) body[k] = null;
               if (body.mapSpot !== undefined) {
                 const nums = body.mapSpot.match(/-?\d+(?:\.\d+)?/g) ?? [];
@@ -2415,6 +2450,223 @@ async function renderResults() {
   );
 }
 
+
+// ---------- Statements ----------
+
+let stmtPeriod = 'month';
+let stmtDate = null; // a store-local YYYY-MM-DD inside the period shown; null is today
+
+const signedMoney = (cents) => (cents < 0 ? `−${money(-cents)}` : money(cents));
+const siteTypeLabel = (t) => (t === 'dealer' ? 'Dealer' : t === 'corporate' ? 'Corporate' : 'Not set');
+/** Net from the site's side: what it owes us, or what we owe it. */
+const netLabel = (st) => (!st.billed ? 'Not billed' : st.netCents > 0 ? `Owes ${money(st.netCents)}` : st.netCents < 0 ? `Credit ${money(-st.netCents)}` : 'Even');
+
+function statementDialog(st, sm) {
+  const line = (label, value, note) => h('tr', {}, h('td', {}, label, note && h('div', { class: 'note' }, note)), h('td', { class: 'num' }, value));
+  const rate = sm.pointChargeCents;
+  openDialog(
+    h('h2', {}, `${st.storeName} · ${sm.period.label}`),
+    h('p', { class: 'note' }, `${siteTypeLabel(st.siteType)} site · ${st.memberVisits.toLocaleString()} member visits${sm.closedAt ? ` · closed ${new Date(sm.closedAt).toLocaleDateString()}, as billed` : ''}`),
+    h(
+      'table',
+      {},
+      h(
+        'tbody',
+        {},
+        st.billed && line('Network fee', money(st.networkFeeCents), sm.period.kind === 'day' || sm.period.kind === 'week' ? 'Billed with the month' : 'One fee for each month the site sent transactions'),
+        line(`Points issued inside (${st.pointsCharged.toLocaleString()} at ${rate}¢)`, st.billed ? money(st.pointsChargeCents) : `${money(st.pointsChargeCents)} (not billed)`),
+        line('Points rewards redeemed here', st.billed && st.redemptionCreditCents ? `−${money(st.redemptionCreditCents)}` : money(st.redemptionCreditCents), `${st.pointsRedeemed.toLocaleString()} points, wherever they were earned`),
+        line('Jobber-funded offers given here', st.billed && st.offerCreditCents ? `−${money(st.offerCreditCents)}` : money(st.offerCreditCents)),
+        st.billed
+          ? h('tr', { class: 'strong' }, h('td', {}, st.netCents >= 0 ? 'Site owes' : 'We owe the site'), h('td', { class: 'num' }, money(Math.abs(st.netCents))))
+          : h('tr', { class: 'strong' }, h('td', {}, 'Rewards cost, from our own margin'), h('td', { class: 'num' }, money(st.rewardCostCents))),
+      ),
+    ),
+    h('h3', { class: 'dialog-section' }, 'For information, not settled'),
+    h(
+      'table',
+      {},
+      h(
+        'tbody',
+        {},
+        line('Store-funded offers', money(st.storeFundedCents), st.billed ? 'The dealer gave these at the register' : null),
+        line('Manufacturer offers (Skupos)', money(st.manufacturerCents), 'The brand pays the store directly'),
+        line('Points on fuel and other jobber-funded points', st.pointsJobberFunded.toLocaleString()),
+      ),
+    ),
+    h('div', { class: 'row' }, h('div', { class: 'grow' }), h('button', { class: 'btn', onclick: closeDialog }, 'Close')),
+  );
+}
+
+function statementSettings() {
+  let rate = String(boot.settings.pointChargeCents ?? 1);
+  let fee = ((boot.settings.networkFeeCents ?? 0) / 100).toFixed(2);
+  const errors = h('div', {});
+  return h(
+    'section',
+    { class: 'card pad' },
+    h('h2', {}, 'Statement settings'),
+    h('p', { class: 'note' }, 'Changes apply to open periods. Closed months keep the rates they were billed at.'),
+    h(
+      'div',
+      { class: 'grid2' },
+      h('label', { class: 'field' }, h('span', {}, 'Charge per point issued, in cents'), h('input', { inputmode: 'decimal', value: rate, oninput: (e) => (rate = e.target.value) }), h('span', { class: 'hint' }, 'Also what a point is worth on the points liability. 1 means 100 points cost the site $1.')),
+      h('label', { class: 'field' }, h('span', {}, 'Default monthly network fee for dealers'), h('input', { inputmode: 'decimal', value: fee, oninput: (e) => (fee = e.target.value) }), h('span', { class: 'hint' }, 'A location can set its own on Locations.')),
+    ),
+    errors,
+    h(
+      'div',
+      { class: 'row' },
+      h('div', { class: 'grow' }),
+      h(
+        'button',
+        {
+          class: 'btn accent',
+          onclick: async () => {
+            try {
+              const r = Number(rate.trim());
+              if (!rate.trim() || !Number.isFinite(r)) throw Object.assign(new Error('Enter the charge per point in cents, like 1 or 0.5.'), { problems: ['Enter the charge per point in cents, like 1 or 0.5.'] });
+              if (!/^\$?\d+(\.\d{1,2})?$/.test(fee.trim())) throw Object.assign(new Error('Enter the network fee in dollars, like 150.00.'), { problems: ['Enter the network fee in dollars, like 150.00.'] });
+              await api('PUT', '/settings', { pointChargeCents: r, networkFeeCents: dollarsToCents(fee.trim()) });
+              await reload();
+              toast('Statement settings saved');
+              renderStatements();
+            } catch (err) {
+              errors.replaceChildren(errorBox(err));
+            }
+          },
+        },
+        'Save',
+      ),
+    ),
+  );
+}
+
+async function renderStatements() {
+  const date = stmtDate ?? localYmd(new Date().toISOString());
+  const sm = await api('GET', `/statements?period=${stmtPeriod}&date=${date}`);
+  const kpi = (label, value, sub) => h('div', { class: 'card kpi' }, h('span', { class: 'label' }, label), h('span', { class: 'value' }, value), sub && h('span', { class: 'sub' }, sub));
+  const go = (ymd) => ((stmtDate = ymd), renderStatements());
+  const dealers = sm.sites.filter((x) => x.billed);
+  main.replaceChildren(
+    h(
+      'header',
+      { class: 'page-head' },
+      h(
+        'div',
+        { class: 'intro' },
+        h('div', { class: 'row' }, h('h1', {}, 'Statements'), sm.sample && h('span', { class: 'badge Sample' }, 'Sample data')),
+        h('span', { class: 'lede' }, isAdmin() ? 'What each site owes or is owed for the rewards program. Months close on their own on the 2nd and stay as billed.' : 'What your sites owe or are owed for the rewards program. Months close on the 2nd.'),
+      ),
+      h(
+        'button',
+        {
+          class: 'btn ghost',
+          onclick: async () => {
+            const { fileName, csv } = await api('GET', `/statements/csv?period=${stmtPeriod}&date=${date}`);
+            downloadText(fileName, csv);
+          },
+        },
+        'Download CSV',
+      ),
+    ),
+    h(
+      'div',
+      { class: 'row' },
+      h(
+        'div',
+        { class: 'pills' },
+        [
+          ['day', 'Day'],
+          ['week', 'Week'],
+          ['month', 'Month'],
+          ['quarter', 'Quarter'],
+          ['year', 'Year'],
+        ].map(([v, l]) => h('button', { class: `pill${stmtPeriod === v ? ' on' : ''}`, onclick: () => ((stmtPeriod = v), renderStatements()) }, l)),
+      ),
+      h('div', { class: 'grow' }),
+      h('button', { class: 'btn ghost', 'aria-label': 'Earlier', onclick: () => go(addDaysYmd(sm.period.start, -1)) }, '‹'),
+      h('strong', {}, sm.period.label),
+      h('button', { class: 'btn ghost', 'aria-label': 'Later', onclick: () => go(addDaysYmd(sm.period.end, 1)) }, '›'),
+    ),
+    isAdmin() && sm.closedAt &&
+      h(
+        'div',
+        { class: 'row' },
+        h('div', { class: 'grow' }),
+        h(
+          'button',
+          {
+            class: 'btn ghost',
+            onclick: async () => {
+              if (!confirm(`Close ${sm.period.label} again with today’s numbers and rates? Use this after fixing a site type or fee. Anything already billed from the old numbers needs settling by hand.`)) return;
+              try {
+                await api('POST', `/statements/${sm.period.start.slice(0, 7)}/reclose`);
+                toast(`${sm.period.label} closed again`);
+                renderStatements();
+              } catch (err) {
+                toast(err.message);
+              }
+            },
+          },
+          'Close again with current numbers',
+        ),
+      ),
+    h(
+      'p',
+      { class: 'note' },
+      sm.closedAt
+        ? `Closed ${new Date(sm.closedAt).toLocaleDateString()}. These are the numbers as billed.`
+        : stmtPeriod === 'month'
+          ? 'Open. Numbers update with every visit until the month closes on the 2nd.'
+          : stmtPeriod === 'day' || stmtPeriod === 'week'
+            ? 'Network fees are billed with the month, so a day or week shows them only once the month has activity. Numbers are live.'
+            : 'Numbers are live, worked out from every visit. Each month inside is settled on its own statement.',
+    ),
+    sm.changedSinceClose.length > 0 &&
+      h('div', { class: 'notice' }, `Visits arrived after this month closed at ${sm.changedSinceClose.map((c) => `${c.storeName} (${signedMoney(c.netCents)})`).join(', ')}. The statement stays as billed; settle the difference by hand.`),
+    isAdmin() && sm.unsetSites.length > 0 &&
+      h('div', { class: 'notice row' }, h('span', { class: 'grow' }, `${sm.unsetSites.length} ${sm.unsetSites.length === 1 ? 'site has' : 'sites have'} no site type yet and ${sm.unsetSites.length === 1 ? 'is' : 'are'} treated as corporate (not billed): ${sm.unsetSites.join(', ')}.`), h('a', { class: 'btn ghost', href: '#/stores' }, 'Set site types')),
+    h(
+      'div',
+      { class: 'kpis' },
+      kpi(isAdmin() ? 'Dealers owe us' : 'You owe', money(sm.totals.dealersOweCents), `${dealers.filter((x) => x.netCents > 0).length} of ${dealers.length} dealer sites`),
+      kpi(isAdmin() ? 'We owe dealers' : 'You are owed', money(sm.totals.owedToDealersCents), 'Credits bigger than fees and points'),
+      isAdmin() && kpi('Rewards cost at corporate sites', money(sm.totals.corporateRewardCostCents), 'From our own margin, not billed'),
+      sm.liability && kpi('Points members hold now', sm.liability.points.toLocaleString(), `Worth ${money(sm.liability.cents)} at ${sm.pointChargeCents}¢ a point`),
+    ),
+    h(
+      'div',
+      { class: 'card table-wrap' },
+      h(
+        'table',
+        { style: 'min-width: 860px' },
+        h('thead', {}, h('tr', {}, ['Site', 'Type', 'Member visits', 'Network fee', 'Points issued inside', 'Points charge', 'Redemption credits', 'Offer credits', 'Net'].map((t, i) => h('th', { class: i >= 2 ? 'num' : '' }, t)))),
+        h(
+          'tbody',
+          {},
+          sm.sites.map((st) =>
+            h(
+              'tr',
+              { class: 'click', tabindex: 0, onclick: () => statementDialog(st, sm), onkeydown: (e) => e.key === 'Enter' && statementDialog(st, sm) },
+              h('td', { class: 'strong', style: 'white-space: nowrap' }, st.storeName),
+              h('td', {}, siteTypeLabel(st.siteType)),
+              h('td', { class: 'num' }, st.memberVisits.toLocaleString()),
+              h('td', { class: 'num' }, st.billed ? money(st.networkFeeCents) : '—'),
+              h('td', { class: 'num' }, st.pointsCharged.toLocaleString()),
+              h('td', { class: 'num' }, money(st.pointsChargeCents)),
+              h('td', { class: 'num' }, money(st.redemptionCreditCents)),
+              h('td', { class: 'num' }, money(st.offerCreditCents)),
+              h('td', { class: 'num strong' }, st.billed ? netLabel(st) : `Cost ${money(st.rewardCostCents)}`),
+            ),
+          ),
+        ),
+      ),
+    ),
+    h('p', { class: 'note' }, 'Dealers pay for the points their customers earn inside, at the rate below, and are credited for points rewards and jobber-funded offers redeemed at their site, wherever the points were earned. Who pays for each reward is set on the reward itself. Click a site for its full statement.'),
+    isAdmin() && statementSettings(),
+  );
+}
 
 // ---------- Reward artwork ----------
 
@@ -3094,6 +3346,7 @@ async function render() {
     if (section === 'stores' && isAdmin()) return renderStores();
     if (section === 'members') return await renderMembers();
     if (section === 'results') return await renderResults();
+    if (section === 'statements') return await renderStatements();
     if (section === 'users' && isAdmin()) return await renderUsers();
     if (section === 'items' && isAdmin()) return await renderItems();
     if (section === 'skupos' && isAdmin()) return await renderSkupos();

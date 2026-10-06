@@ -218,6 +218,10 @@ export class Repo {
     if (store.skuposEnrolled) store.skuposEnrolled = true;
     else delete store.skuposEnrolled;
     if (store.lat !== undefined) delete store.mapLookupFailed;
+    if (!store.siteType) delete store.siteType;
+    else if (!['corporate', 'dealer'].includes(store.siteType)) throw new ConsoleError('Pick corporate or dealer for the site type.');
+    if (store.networkFeeCents === undefined || (store.networkFeeCents as unknown) === '') delete store.networkFeeCents;
+    else if (!Number.isInteger(store.networkFeeCents) || store.networkFeeCents < 0) throw new ConsoleError('The network fee must be a dollar amount, like 150.00.');
     if (!store.photoMediaId) delete store.photoMediaId;
     else if (!this.data.media?.some((x) => x.id === store.photoMediaId)) throw new ConsoleError('That store photo is no longer in the artwork library.');
     const unknown = store.groupIds.filter((g) => !this.data.groups.some((x) => x.id === g));
@@ -367,6 +371,9 @@ export class Repo {
     const intOk = (n: number) => Number.isInteger(n) && n >= 0;
     if (!intOk(next.pointsExpireMonths) || !intOk(next.maxStoreDiscountCents) || !intOk(next.monthlyBudgetCents))
       throw new ConsoleError('Settings must be whole, non-negative numbers.');
+    if (next.networkFeeCents !== undefined && !intOk(next.networkFeeCents)) throw new ConsoleError('The network fee must be a dollar amount, like 150.00.');
+    if (next.pointChargeCents !== undefined && !(Number.isFinite(next.pointChargeCents) && next.pointChargeCents >= 0 && next.pointChargeCents <= 100))
+      throw new ConsoleError('The charge per point must be between 0 and 100 cents.');
     if (next.fuelStacking.mode === 'stack' && !(next.fuelStacking.maxCentsPerGallon > 0))
       throw new ConsoleError('Set the most cents per gallon a fill-up can get.');
     if (next.legal) {
@@ -471,6 +478,7 @@ export class Repo {
       memberId,
       pointsEarned: result.pointsEarned,
       pointsSpent: result.pointsSpent,
+      ...(result.earned?.length ? { earned: result.earned } : {}),
       appliedRuleIds: result.appliedRuleIds,
       discounts: result.discounts.map((d) => ({ ruleId: d.ruleId, centsOff: d.centsOff })),
     };
@@ -485,6 +493,8 @@ export class Repo {
     if (actor.role !== 'jobber-admin') throw new ConsoleError('Only a jobber admin can clear sample data.', 403);
     const sampleMembers = new Set(this.data.ledger.filter((e) => e.sample && e.memberId).map((e) => e.memberId));
     this.data.ledger = this.data.ledger.filter((e) => !e.sample);
+    // Statements closed from sample visits would bill made-up numbers; they close again from real ones.
+    this.data.closedMonths = this.data.closedMonths?.filter((c) => !c.sample);
     this.data.members = this.data.members.filter((m) => !sampleMembers.has(m.id) && !m.tags.includes('sample'));
     this.log(actor, 'Cleared sample data');
     this.save();
@@ -503,6 +513,7 @@ function onlyApplied(result: EvaluationResult, applied: { ruleId: string; centsO
   }
   return {
     pointsEarned: result.pointsEarned,
+    earned: result.earned,
     pointsSpent: result.pointsSpent - dropped.reduce((s, d) => s + (d.pointsSpent ?? 0), 0),
     discounts: result.discounts
       .filter((d) => !droppedIds.has(d.ruleId))
