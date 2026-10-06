@@ -815,11 +815,17 @@ function directionsUrl(s) {
 
 const storeLine = (s) => [s.address, [s.city, s.state].filter(Boolean).join(', ') + (s.zip ? ` ${s.zip}` : '')].filter((x) => x.trim()).join(' · ');
 
-function storeCard(s, homeId) {
+function storeCard(s, homeId, showOnMap) {
   const miles = milesTo(s);
+  const onMap = s.lat !== null && showOnMap;
   return h(
     'article',
-    { class: 'promo store-card', id: `store-${s.id}` },
+    {
+      class: `promo store-card${onMap ? ' tappable' : ''}`,
+      id: `store-${s.id}`,
+      // Tapping a store (anywhere but its buttons) takes the map to its pin.
+      onclick: onMap ? (e) => !e.target.closest('a, button') && showOnMap(s.id) : undefined,
+    },
     h(
       'div',
       { class: 'art-wrap' },
@@ -842,6 +848,7 @@ function storeCard(s, homeId) {
         'div',
         { class: 'row-btns' },
         h('a', { class: 'pill-btn', href: directionsUrl(s), target: '_blank', rel: 'noopener' }, 'Directions'),
+        onMap && h('button', { class: 'pill-btn outline', onclick: () => showOnMap(s.id) }, 'Map'),
         s.phone && h('a', { class: 'pill-btn outline', href: `tel:${s.phone}` }, 'Call'),
         s.loyaltyLive && s.offers > 0 && h('a', { class: 'pill-btn outline', href: '#/offers', onclick: () => (offerStoreId = s.id) }, 'Offers'),
       ),
@@ -882,6 +889,15 @@ async function renderStores() {
     ? [...stores].sort((a, b) => (milesTo(a) ?? 1e9) - (milesTo(b) ?? 1e9))
     : [...stores].sort((a, b) => Number(b.id === homeStoreId) - Number(a.id === homeStoreId) || Number(b.loyaltyLive) - Number(a.loyaltyLive) || siteNo(a) - siteNo(b));
   const mapEl = h('div', { class: 'store-map', role: 'region', 'aria-label': 'Map of stores' });
+  const markers = new Map();
+  let map = null;
+  function showOnMap(id) {
+    const marker = markers.get(id);
+    if (!map || !marker) return;
+    mapEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    map.flyTo(marker.getLatLng(), Math.max(map.getZoom(), 15), { duration: 0.8 });
+    map.once('moveend', () => marker.openPopup());
+  }
   frame(
     'stores',
     h('header', { class: 'page-title' }, h('h1', {}, 'Stores'), h('span', {}, `${stores.length} ${stores.length === 1 ? 'location' : 'locations'}`)),
@@ -892,20 +908,20 @@ async function renderStores() {
       h('div', { class: 'map-key' }, h('span', {}, h('i', { class: 'dot live' }), 'Rewards live'), h('span', {}, h('i', { class: 'dot soon' }), 'Coming soon')),
       h('p', { class: 'fine' }, 'Rewards are valid only at participating locations where they are live.'),
       h('div', { class: 'between' }, h('b', {}, here ? 'Closest to you' : 'All stores'), !here && h('button', { class: 'filter', onclick: findStoresNear }, svg(ICONS.pin), ' Near me')),
-      sorted.map((s) => storeCard(s, homeStoreId)),
+      sorted.map((s) => storeCard(s, homeStoreId, showOnMap)),
     ),
   );
   try {
     const L = await loadLeaflet();
     if (!mapEl.isConnected) return;
-    const map = L.map(mapEl, { scrollWheelZoom: false, attributionControl: true });
+    map = L.map(mapEl, { scrollWheelZoom: false, attributionControl: true });
     addBaseMap(L, map);
     const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#c8102e';
     // Live stores and the member's own store go on top, so coming-soon dots never hide them.
     const rank = (s) => (s.id === homeStoreId ? 2 : s.loyaltyLive ? 1 : 0);
     for (const s of [...placed].sort((a, b) => rank(a) - rank(b))) {
       const pop = h('div', { class: 'map-pop' }, h('b', {}, s.name), h('div', { class: s.loyaltyLive ? 'good' : 'sub' }, s.loyaltyLive ? 'Rewards live' : 'Rewards coming soon'), storeLine(s) && h('div', {}, storeLine(s)), h('a', { href: directionsUrl(s), target: '_blank', rel: 'noopener' }, 'Directions'), ' · ', h('a', { href: `#store-${s.id}`, onclick: (e) => (e.preventDefault(), document.getElementById(`store-${s.id}`)?.scrollIntoView({ behavior: 'smooth' })) }, 'Details'));
-      L.circleMarker([s.lat, s.lng], { radius: s.id === homeStoreId ? 11 : s.loyaltyLive ? 9 : 7, color: '#fff', weight: 3, fillColor: s.loyaltyLive ? accent : '#8a94a3', fillOpacity: 1 }).addTo(map).bindPopup(pop);
+      markers.set(s.id, L.circleMarker([s.lat, s.lng], { radius: s.id === homeStoreId ? 11 : s.loyaltyLive ? 9 : 7, color: '#fff', weight: 3, fillColor: s.loyaltyLive ? accent : '#8a94a3', fillOpacity: 1 }).addTo(map).bindPopup(pop, { maxWidth: 240, autoPanPaddingTopLeft: [50, 12], autoPanPaddingBottomRight: [12, 12] }));
     }
     const points = placed.map((s) => [s.lat, s.lng]);
     if (here) {
