@@ -18,10 +18,17 @@ export function termsSections(p) {
   return [
     [
       'About the program',
-      `${name} (the "Program") is a free loyalty program run by ${p.company} ("we", "us"). It is offered at participating VGO stores in ${list(p.states.map((st) => STATE_NAMES[st] ?? st))}. By joining or using the Program you agree to these terms.`,
+      `${name} (the "Program") is a free loyalty program run by ${p.company} ("we", "us"). It is offered only at participating VGO locations in ${list(p.states.map((st) => STATE_NAMES[st] ?? st))}. By joining or using the Program you agree to these terms.`,
+    ],
+    [
+      'Participating locations only',
+      'Points, rewards, and offers are valid ONLY at participating locations where the Program is live. Not every VGO-branded store, and not every store we supply, participates, and no store is required to participate.',
       p.liveStores.length
-        ? `Rewards can be earned and used at stores where the Program is live. Today that is ${list(p.liveStores)}. The app shows which stores are live and which are coming soon.`
-        : 'Rewards can be earned and used at stores where the Program is live. The app shows which stores are live.',
+        ? `The participating locations today are: ${list(p.liveStores)}. The app shows each location as "Rewards live" or "coming soon". A location shown as coming soon does not participate yet, and you cannot earn or use points or rewards there.`
+        : 'The app shows each location as "Rewards live" or "coming soon". A location shown as coming soon does not participate yet, and you cannot earn or use points or rewards there.',
+      'We may add or remove participating locations, or pause the Program at a location, at any time and without notice. When a location stops participating, points and rewards cannot be earned or used there, but points already in your account stay in your account for use at other participating locations.',
+      'Purchases at a location that is not participating, or while the Program is paused there, do not earn points and cannot be credited later. A store employee cannot override this.',
+      'Each offer also lists the participating locations where it can be used; an offer is valid only at those locations, even if the Program is live at others.',
     ],
     [
       'Who can join',
@@ -36,14 +43,14 @@ export function termsSections(p) {
     ],
     [
       'Using points and rewards',
-      p.redeem.length ? ['Points rewards available at every live store include:', ...p.redeem.map((e) => `${e}.`)] : 'The app lists the rewards you can use your points for.',
+      p.redeem.length ? ['Points rewards available at participating locations include:', ...p.redeem.map((e) => `${e}.`)] : 'The app lists the rewards you can use your points for.',
       `Choose a reward in the app before your visit, or add an offer to your card, then enter your phone number or scan your barcode at the pump or register. ${p.oneFuelDiscount ? 'Only one fuel discount applies per fill-up; if more than one is available, you get the largest. ' : ''}Fuel discounts apply only up to the number of gallons stated on the reward.`,
       'Points and rewards have no cash value, cannot be sold, transferred, or combined between accounts, and cannot be exchanged for cash or credit. Unused value on a reward is lost. Unless an offer says otherwise and the law allows it, rewards cannot be used toward tobacco, alcohol, lottery, or gift cards, or toward anything else the law or the store does not allow.',
       expiry,
     ],
     [
       'Offers and special rewards',
-      'Offers have their own dates, limits, and participating stores, which are shown in the app. Some offers are run and paid for by a single store or by a manufacturer and apply only where stated. We may limit how often an offer can be used.',
+      'Offers have their own dates, limits, and participating locations, which are shown in the app. Some offers are run and paid for by a single store or by a manufacturer and apply only at the locations stated. We may limit how often an offer can be used.',
       'Birthday rewards are available once per year during the window shown in the app, and only if your date of birth is on your account.',
       'Some offers are only for members 21 and older and are shown only to them. These offers still require a valid photo ID at the register, and the store may refuse any age-restricted sale.',
     ],
@@ -59,7 +66,7 @@ export function termsSections(p) {
     ],
     [
       'Limits on our responsibility',
-      'The Program is provided "as is". We are not responsible for points or rewards that are not credited because of a POS, network, or app outage, but we will try to correct a missed credit if you contact us within 30 days with your receipt. To the extent allowed by law, our total responsibility to you for anything related to the Program is limited to the value of the rewards in your account.',
+      'The Program is provided "as is". We are not responsible for a location not participating, or stopping participation, in the Program. We are not responsible for points or rewards that are not credited because of a POS, network, or app outage, but we will try to correct a missed credit if you contact us within 30 days with your receipt. To the extent allowed by law, our total responsibility to you for anything related to the Program is limited to the value of the rewards in your account.',
       `These terms are governed by the laws of the State of ${STATE_NAMES[p.governingState] ?? p.governingState}, without regard to its conflict-of-law rules. The Program is void where prohibited.`,
     ],
     ['Contact', contactLines(p).length > 1 ? contactLines(p) : `Questions about the Program? Ask at any participating VGO store.`],

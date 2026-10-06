@@ -53,6 +53,8 @@ export interface ConsoleStore {
   loyaltyLive: boolean;
   /** Store locator in the app: a photo from the artwork library, a short promo line and opening hours. */
   photoMediaId?: string;
+  /** The address the automatic map lookup couldn't find; cleared when a map spot is set. */
+  mapLookupFailed?: string;
   tagline?: string;
   hours?: string;
   /** POS categories mapped for this store, e.g. "sandwiches". Offers on unmapped categories get a warning. */

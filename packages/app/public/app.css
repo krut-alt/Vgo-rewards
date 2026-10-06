@@ -229,3 +229,8 @@ dialog::backdrop { background: rgba(15, 39, 71, 0.45); }
 .good { color: var(--good); }
 .spent { color: var(--accent); }
 .store-card .ribbon { left: auto; right: 12px; }
+.map-key { display: flex; gap: 16px; font-size: 13px; color: var(--muted); margin-top: -6px; }
+.map-key span { display: inline-flex; align-items: center; gap: 6px; }
+.map-key .dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px var(--line); display: inline-block; }
+.map-key .dot.live { background: var(--accent); }
+.map-key .dot.soon { background: #8a94a3; }

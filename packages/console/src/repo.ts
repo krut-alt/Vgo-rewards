@@ -204,6 +204,7 @@ export class Repo {
       else if (v.length > 80) throw new ConsoleError(`Keep the ${k === 'hours' ? 'hours' : 'promo line'} under 80 characters.`);
       else store[k] = v;
     }
+    if (store.lat !== undefined) delete store.mapLookupFailed;
     if (!store.photoMediaId) delete store.photoMediaId;
     else if (!this.data.media?.some((x) => x.id === store.photoMediaId)) throw new ConsoleError('That store photo is no longer in the artwork library.');
     const unknown = store.groupIds.filter((g) => !this.data.groups.some((x) => x.id === g));
@@ -212,6 +213,17 @@ export class Repo {
     if (i >= 0) this.data.stores[i] = store;
     else this.data.stores.push(store);
     this.log(actor, `${i >= 0 ? 'Updated' : 'Added'} location ${store.name}${store.loyaltyLive ? ' (loyalty live)' : ''}`);
+    this.save();
+    return store;
+  }
+
+  /** Turns rewards on or off at a store: live stores earn and redeem; offline ones show as coming soon. */
+  setStoreLive(id: string, live: boolean, actor: Actor): ConsoleStore {
+    if (actor.role !== 'jobber-admin') throw new ConsoleError('Only a jobber admin can change stores.', 403);
+    const store = this.store(id);
+    if (store.loyaltyLive === live) return store;
+    store.loyaltyLive = live;
+    this.log(actor, `${store.name} is now ${live ? 'live on' : 'offline from'} the rewards network`);
     this.save();
     return store;
   }
