@@ -89,5 +89,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -f packages/app/public/download/vgo-rewards.apk packages/app/public/download/android.json
           git commit -m "Android test build 0.1.${{ github.run_number }}"
+          # Drop the build's own edits (server address, synced files) before syncing with the branch.
+          git checkout -- .
           git pull --rebase origin "$BRANCH"
           git push origin "HEAD:$BRANCH"
