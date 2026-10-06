@@ -68,3 +68,11 @@ takes about a minute.
 
 The member app at `/app/` stays open to everyone; the console and its API ask for the password.
 The server refuses to start on a public address without `VGO_ADMIN_PASSWORD`.
+
+## Phone app
+
+`packages/mobile` wraps the member app in a native shell ([Capacitor](https://capacitorjs.com)). The test build opens the live member app from the server set in `capacitor.config.json`, so app changes reach phones without a new install.
+
+- **Android test build:** the `Android test build` GitHub Action builds an APK whenever `packages/mobile` changes, or by hand from the Actions tab (where you can also point it at another server). It commits the APK to `packages/app/public/download/`, and the site offers it at `/download`. It is signed with a test key kept in the repo, which is fine for direct downloads only; the Play Store build will use a private key.
+- **iPhone:** until there is an Apple developer account, testers add `/app/` to the home screen from Safari (the `/download` page explains how). A TestFlight build needs the $99/year Apple Developer Program and a Mac (or a cloud Mac build) to add the `ios` platform.
+- **Locally:** `cd packages/mobile && npm ci && npx cap sync android`, then open `android/` in Android Studio.

@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0F2747">
+  <title>Get the VGO Rewards app</title>
+  <link rel="icon" href="/app/vgo-logo.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
+  <style>
+    :root { --main: #0f2747; --accent: #c8102e; --bg: #f3f4f1; --line: #dcdfe3; --muted: #55606e; --gold: #fff1a8; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--main); font-family: 'Barlow', system-ui, sans-serif; }
+    header { background: var(--main); color: #fff; padding: 28px 16px 32px; text-align: center; }
+    header img { width: 84px; height: 84px; object-fit: contain; }
+    h1 { font-family: 'Barlow Condensed', sans-serif; font-size: 32px; margin: 6px 0 4px; letter-spacing: .02em; }
+    header p { margin: 0; color: #c9d3e0; }
+    .test { display: inline-block; margin-top: 12px; background: var(--gold); color: #8a0b1f; font-weight: 700; font-size: 13px; padding: 4px 10px; border-radius: 99px; }
+    main { max-width: 560px; margin: 0 auto; padding: 20px 16px 48px; display: flex; flex-direction: column; gap: 16px; }
+    section { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
+    h2 { font-family: 'Barlow Condensed', sans-serif; font-size: 24px; margin: 0 0 4px; }
+    .meta { color: var(--muted); font-size: 14px; margin: 0 0 14px; }
+    .btn { display: block; text-align: center; background: var(--accent); color: #fff; text-decoration: none; font-weight: 700; font-size: 18px; padding: 15px; border-radius: 10px; }
+    .btn.alt { background: var(--main); }
+    .btn[aria-disabled="true"] { background: #b9c0c9; pointer-events: none; }
+    ol { margin: 16px 0 0; padding-left: 22px; line-height: 1.5; }
+    li + li { margin-top: 6px; }
+    .note { font-size: 14px; color: var(--muted); margin: 14px 0 0; line-height: 1.45; }
+    footer { text-align: center; font-size: 13px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <img src="/app/vgo-logo.png" alt="VGO">
+    <h1>VGO Rewards</h1>
+    <p>Earn points on fuel and in-store, and use offers at checkout.</p>
+    <span class="test">Test version</span>
+  </header>
+  <main id="sections">
+    <section id="android">
+      <h2>Android phones</h2>
+      <p class="meta" id="android-meta">Checking for the latest build…</p>
+      <a class="btn" id="apk" href="/app/download/vgo-rewards.apk" download="vgo-rewards.apk">Download the app</a>
+      <ol>
+        <li>Tap <b>Download the app</b>, then open the file when it finishes.</li>
+        <li>If your phone asks, allow your browser to <b>install unknown apps</b>, then go back.</li>
+        <li>Tap <b>Install</b>. If Play Protect warns about an unknown app, tap <b>More details</b>, then <b>Install anyway</b>.</li>
+        <li>Open <b>VGO Rewards</b> from your home screen.</li>
+      </ol>
+      <p class="note">This test app comes straight from VGO, not the Play Store, which is why Android asks first. To update, download it again and install over the old one.</p>
+    </section>
+    <section id="iphone">
+      <h2>iPhone</h2>
+      <p class="meta">The App Store version is coming. Until then, add the app to your home screen.</p>
+      <a class="btn alt" href="/app/">Open VGO Rewards</a>
+      <ol>
+        <li>Open this page in <b>Safari</b>, then tap <b>Open VGO Rewards</b>.</li>
+        <li>Tap the <b>Share</b> button, then <b>Add to Home Screen</b>.</li>
+        <li>Tap <b>Add</b>. VGO Rewards now opens from its own icon, full screen.</li>
+      </ol>
+    </section>
+    <footer>Test mode: your sign-in code shows on screen instead of by text.</footer>
+  </main>
+  <script>
+    // Show the section for this phone first.
+    if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
+      document.getElementById('sections').prepend(document.getElementById('iphone'));
+    }
+    const meta = document.getElementById('android-meta');
+    fetch('/app/download/android.json', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((b) => {
+        const date = new Date(b.builtAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+        meta.textContent = `Version ${b.version} · ${date} · ${b.sizeMB} MB`;
+      })
+      .catch(() => {
+        meta.textContent = 'The first Android build is not ready yet. Check back soon.';
+        const apk = document.getElementById('apk');
+        apk.setAttribute('aria-disabled', 'true');
+        apk.removeAttribute('href');
+      });
+  </script>
+</body>
+</html>

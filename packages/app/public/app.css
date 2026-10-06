@@ -22,7 +22,7 @@ button, input, select { font-family: inherit; color: inherit; }
 a { color: var(--main); font-weight: 600; }
 .sr { position: absolute; left: -9999px; }
 
-.phone { max-width: 480px; margin: 0 auto; min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; background: var(--bg); }
+.phone { max-width: 480px; margin: 0 auto; min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; background: var(--bg); padding-top: env(safe-area-inset-top); }
 
 /* Logo lockup */
 .lockup { display: flex; align-items: center; gap: 8px; }
