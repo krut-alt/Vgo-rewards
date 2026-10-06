@@ -20,6 +20,11 @@ Field-by-field types are in `packages/console/src/pos/link.ts`.
 | `rewards` | Pump authorization and again before tender | Discounts to apply: fuel as cents per gallon with a gallon cap, item discounts with the line ids they go on, basket discounts |
 | `finalize` | After payment, with what the POS actually applied | Points earned and spent, new balance, receipt lines. Repeating a finalize is answered with `duplicate`, never counted twice |
 | `cancel` | Sale voided before payment | `ok`. Nothing is reserved between `rewards` and `finalize`, so nothing to undo |
+| `prices` | Whenever the vendor or back office can push pump prices: `{siteId, prices: [{grade, pricePerGallonCents, at?}]}` | How many grades changed |
+
+Pump prices also come from every `rewards` and `finalize` that carries fuel (`pricePerGallonCents` to a tenth of a
+cent, so $3.199 is `319.9`). The newest price per grade is kept on the store, shown in the app's store list, and
+hidden after 7 days without an update. Prices can also be typed in on the Locations page.
 
 `GET /api/pos/feed?after=<cursor>&siteId=<site>&limit=<n>` lists recorded sales oldest first, for
 the vendor's reconciliation and back-office exports. Pass the returned `next` as `after` to continue.

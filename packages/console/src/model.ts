@@ -57,6 +57,8 @@ export interface ConsoleStore {
   mapLookupFailed?: string;
   tagline?: string;
   hours?: string;
+  /** Pump prices by our grade id (regular, midgrade, premium, diesel), from the POS link or typed in the portal. */
+  fuelPrices?: Record<string, FuelPrice>;
   /** POS categories mapped for this store, e.g. "sandwiches". Offers on unmapped categories get a warning. */
   mappedCategories: string[];
 }
@@ -103,6 +105,28 @@ export interface Branding {
   logoDataUrl: string;
   mainColor: string;
   accentColor: string;
+}
+
+export interface ItemUpload {
+  id: string;
+  fileName?: string;
+  uploadedAt: string;
+  /** Portal user id. */
+  uploadedBy: string;
+  /** The stores it was assigned to; empty means every store without its own list. */
+  storeIds: string[];
+  count: number;
+  skipped: number;
+  /** Whether the original file was kept for download. */
+  fileKept: boolean;
+}
+
+export interface FuelPrice {
+  /** Cents per gallon, to a tenth of a cent ($3.199 is 319.9). */
+  cents: number;
+  /** When the price was seen or set. */
+  at: string;
+  source: 'pos' | 'manual';
 }
 
 export interface ProgramSettings {
@@ -191,8 +215,14 @@ export interface ConsoleData {
   portal?: PortalAuth;
   /** Uploaded reward artwork; the image bytes live in the media store. */
   media?: MediaInfo[];
-  /** The latest uploaded pricebook. */
+  /** The pricebook from before uploads could be assigned to stores; read as the all-stores list until the next upload. */
   items?: ItemCatalog;
+  /** Item lists in use, by upload id. Older uploads keep only their history entry and original file. */
+  itemLists?: Record<string, ItemCatalog>;
+  /** Which upload is current for each store id, and for "*" (every store without its own). */
+  currentItems?: Record<string, string>;
+  /** Every pricebook upload, newest last. */
+  itemUploads?: ItemUpload[];
   /** Data updates already applied to this file; see migrate.ts. */
   migrations?: string[];
   /** When the pilot started, for "day 45 of 90" on Results. */

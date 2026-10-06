@@ -4,6 +4,8 @@ import { stockArtFor, stockArtUrl } from './stock-art.js';
 import { createHash, randomBytes, randomInt } from 'node:crypto';
 import { ageOn, conditionPasses, inSchedule, inScope, type Actor, type Rule, type Transaction } from '../../engine/src/index.js';
 import { localParts } from './dates.js';
+import { fuelPricesForApp } from './fuel-prices.js';
+import { everyItem } from './items.js';
 import { lastDay, memberLine, rewardLabel, targetLabel } from './labels.js';
 import { shortDate } from './dates.js';
 import type { AppAuth, ConsoleMember, ConsoleRule, ConsoleStore } from './model.js';
@@ -274,7 +276,7 @@ export class MemberApi {
 
   private artFields(r: ConsoleRule): { imageUrl?: string; stockArtUrl?: string } {
     if (r.artwork) return { imageUrl: mediaUrl(r.artwork.mediaId) };
-    const stock = stockArtFor(r, this.repo.data.items);
+    const stock = stockArtFor(r, everyItem(this.repo.data));
     return stock ? { stockArtUrl: stockArtUrl(stock.id) } : {};
   }
 
@@ -342,6 +344,7 @@ export class MemberApi {
         hours: s.hours ?? '',
         photoUrl: s.photoMediaId ? mediaUrl(s.photoMediaId) : null,
         loyaltyLive: s.loyaltyLive,
+        fuelPrices: fuelPricesForApp(s, this.clock()),
         offers: s.loyaltyLive ? this.offers(m, s.id).offers.length : 0,
       })),
     };

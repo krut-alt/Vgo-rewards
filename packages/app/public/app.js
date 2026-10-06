@@ -815,6 +815,22 @@ function directionsUrl(s) {
 
 const storeLine = (s) => [s.address, [s.city, s.state].filter(Boolean).join(', ') + (s.zip ? ` ${s.zip}` : '')].filter((x) => x.trim()).join(' · ');
 
+/** Pump prices by grade, e.g. Regular $3.19⁹. The last digit is the tenth of a cent, as on the sign. */
+function fuelPriceRow(s) {
+  if (!s.fuelPrices?.length) return null;
+  const newest = s.fuelPrices.reduce((a, p) => (p.updatedAt > a ? p.updatedAt : a), '');
+  return h(
+    'div',
+    { class: 'fuel-prices' },
+    h(
+      'div',
+      { class: 'fuel-grid' },
+      s.fuelPrices.map((p) => h('div', { class: 'fuel-price' }, h('span', { class: 'sub' }, p.label), h('b', {}, `$${p.price.slice(0, -1)}`, h('sup', {}, p.price.slice(-1))))),
+    ),
+    h('span', { class: 'sub small' }, `Gas prices as of ${new Date(newest).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`),
+  );
+}
+
 function storeCard(s, homeId) {
   const miles = milesTo(s);
   return h(
@@ -834,6 +850,7 @@ function storeCard(s, homeId) {
       h('div', { class: 'between' }, h('b', { class: 'store-name' }, s.name), miles !== null && h('span', { class: 'sub' }, `${miles < 10 ? miles.toFixed(1) : Math.round(miles)} mi`)),
       storeLine(s) && h('span', { class: 'sub' }, storeLine(s)),
       s.tagline && h('span', {}, s.tagline),
+      fuelPriceRow(s),
       s.hours && h('span', { class: 'sub' }, `Hours: ${s.hours}`),
       s.loyaltyLive
         ? s.offers > 0 && h('span', { class: 'kicker' }, `${s.offers} ${s.offers === 1 ? 'offer' : 'offers'} for you here`)
@@ -904,7 +921,7 @@ async function renderStores() {
     // Live stores and the member's own store go on top, so coming-soon dots never hide them.
     const rank = (s) => (s.id === homeStoreId ? 2 : s.loyaltyLive ? 1 : 0);
     for (const s of [...placed].sort((a, b) => rank(a) - rank(b))) {
-      const pop = h('div', { class: 'map-pop' }, h('b', {}, s.name), h('div', { class: s.loyaltyLive ? 'good' : 'sub' }, s.loyaltyLive ? 'Rewards live' : 'Rewards coming soon'), storeLine(s) && h('div', {}, storeLine(s)), h('a', { href: directionsUrl(s), target: '_blank', rel: 'noopener' }, 'Directions'), ' · ', h('a', { href: `#store-${s.id}`, onclick: (e) => (e.preventDefault(), document.getElementById(`store-${s.id}`)?.scrollIntoView({ behavior: 'smooth' })) }, 'Details'));
+      const pop = h('div', { class: 'map-pop' }, h('b', {}, s.name), h('div', { class: s.loyaltyLive ? 'good' : 'sub' }, s.loyaltyLive ? 'Rewards live' : 'Rewards coming soon'), storeLine(s) && h('div', {}, storeLine(s)), s.fuelPrices?.[0] && h('div', {}, `${s.fuelPrices[0].label} $${s.fuelPrices[0].price}`), h('a', { href: directionsUrl(s), target: '_blank', rel: 'noopener' }, 'Directions'), ' · ', h('a', { href: `#store-${s.id}`, onclick: (e) => (e.preventDefault(), document.getElementById(`store-${s.id}`)?.scrollIntoView({ behavior: 'smooth' })) }, 'Details'));
       L.circleMarker([s.lat, s.lng], { radius: s.id === homeStoreId ? 11 : s.loyaltyLive ? 9 : 7, color: '#fff', weight: 3, fillColor: s.loyaltyLive ? accent : '#8a94a3', fillOpacity: 1 }).addTo(map).bindPopup(pop);
     }
     const points = placed.map((s) => [s.lat, s.lng]);

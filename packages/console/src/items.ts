@@ -1,6 +1,7 @@
 // The items catalog: a pricebook export (CSV) uploaded in the console. Item rewards will point at
 // these SKUs and UPCs later, so the POS lines they ring up can be matched exactly.
 import { CATEGORIES } from './catalog.js';
+import type { ConsoleData, ItemUpload } from './model.js';
 import { ConsoleError } from './repo.js';
 
 export interface CatalogItem {
@@ -110,4 +111,55 @@ export function searchItems(catalog: ItemCatalog | undefined, q: string, limit =
     ? items.filter((i) => i.name.toLowerCase().includes(needle) || i.sku.toLowerCase().includes(needle) || i.upc?.includes(needle) || i.department?.toLowerCase().includes(needle))
     : items;
   return { total: hits.length, items: hits.slice(0, limit) };
+}
+
+/** The key in `currentItems` for the list every store uses unless it has its own. */
+export const ALL_STORES = '*';
+
+/** The item list a store uses: its own upload, else the all-stores list. No store means the all-stores list. */
+export function catalogFor(d: ConsoleData, storeId?: string): ItemCatalog | undefined {
+  const id = (storeId && d.currentItems?.[storeId]) || d.currentItems?.[ALL_STORES];
+  return id ? d.itemLists?.[id] : d.items;
+}
+
+/** Every current list together (first one wins for a SKU), for matching item names across the chain. */
+export function everyItem(d: ConsoleData): ItemCatalog | undefined {
+  const ids = [...new Set(Object.values(d.currentItems ?? {}))];
+  if (!ids.length) return d.items;
+  const bySku = new Map<string, CatalogItem>();
+  for (const id of ids) for (const i of d.itemLists?.[id]?.items ?? []) if (!bySku.has(i.sku)) bySku.set(i.sku, i);
+  return { items: [...bySku.values()], uploadedAt: '' };
+}
+
+/** Records an upload and makes it current for its stores (or for all stores). Lists nobody uses are dropped. */
+export function addItemUpload(
+  d: ConsoleData,
+  items: CatalogItem[],
+  meta: { id: string; fileName?: string; storeIds: string[]; at: string; by: string; skipped: number; fileKept: boolean },
+): ItemUpload {
+  const unknown = meta.storeIds.find((id) => !d.stores.some((s) => s.id === id));
+  if (unknown) throw new ConsoleError(`Unknown store ${unknown}.`);
+  // The old single catalog becomes an ordinary all-stores list first.
+  if (d.items && !d.currentItems) {
+    d.itemLists = { legacy: d.items };
+    d.currentItems = { [ALL_STORES]: 'legacy' };
+  }
+  delete d.items;
+  d.itemLists ??= {};
+  d.currentItems ??= {};
+  d.itemLists[meta.id] = { items, uploadedAt: meta.at, ...(meta.fileName ? { fileName: meta.fileName } : {}) };
+  for (const key of meta.storeIds.length ? meta.storeIds : [ALL_STORES]) d.currentItems[key] = meta.id;
+  const inUse = new Set(Object.values(d.currentItems));
+  for (const id of Object.keys(d.itemLists)) if (!inUse.has(id)) delete d.itemLists[id];
+  const upload: ItemUpload = { id: meta.id, ...(meta.fileName ? { fileName: meta.fileName } : {}), uploadedAt: meta.at, uploadedBy: meta.by, storeIds: meta.storeIds, count: items.length, skipped: meta.skipped, fileKept: meta.fileKept };
+  d.itemUploads = [...(d.itemUploads ?? []), upload].slice(-500);
+  return upload;
+}
+
+/** A store goes back to the all-stores list. */
+export function clearStoreItems(d: ConsoleData, storeId: string): void {
+  if (!d.currentItems?.[storeId]) return;
+  delete d.currentItems[storeId];
+  const inUse = new Set(Object.values(d.currentItems));
+  for (const id of Object.keys(d.itemLists ?? {})) if (!inUse.has(id)) delete d.itemLists![id];
 }

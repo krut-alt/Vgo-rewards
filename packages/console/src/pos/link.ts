@@ -13,7 +13,8 @@
 // worked out again, so a server restart between the two loses nothing.
 import { CATEGORIES, FUEL_GRADES } from '../catalog.js';
 import { localParts } from '../dates.js';
-import { categoryFor } from '../items.js';
+import { noteFuelPrice } from '../fuel-prices.js';
+import { catalogFor, categoryFor } from '../items.js';
 import type { ConsoleMember, ConsoleStore } from '../model.js';
 import { ConsoleError, type Repo } from '../repo.js';
 import { inScope, type AppliedDiscount, type LineItem, type Transaction } from '../../../engine/src/index.js';
@@ -36,6 +37,7 @@ export interface LinkFuel {
   grade: string;
   /** Unknown at pump authorization; sent once fueling is done. */
   gallons?: number;
+  /** To a tenth of a cent: $3.199 is 319.9. */
   pricePerGallonCents: number;
 }
 
@@ -63,7 +65,9 @@ export type LinkRequest =
   | { op: 'identify'; siteId: string; loyaltyId: string }
   | { op: 'rewards'; sale: LinkSale }
   | { op: 'finalize'; sale: LinkFinalize }
-  | { op: 'cancel'; siteId: string; linkTxId: string };
+  | { op: 'cancel'; siteId: string; linkTxId: string }
+  /** Current pump prices, if the vendor or back office can push them. Sales report prices too. */
+  | { op: 'prices'; siteId: string; prices: { grade: string; pricePerGallonCents: number; at?: string }[] };
 
 export type LinkOp = LinkRequest['op'];
 
@@ -110,7 +114,8 @@ export type LinkAnswer =
       pointsBalance?: number;
       receipt: string[];
     }
-  | { op: 'cancel'; status: 'ok'; linkTxId: string };
+  | { op: 'cancel'; status: 'ok'; linkTxId: string }
+  | { op: 'prices'; status: 'ok'; updated: number };
 
 const GRADE_CODES: Record<string, string> = { unl: 'regular', reg: 'regular', mid: 'midgrade', plus: 'midgrade', prem: 'premium', sup: 'premium', dsl: 'diesel' };
 
@@ -144,6 +149,13 @@ export class PosLink {
         // Nothing is reserved between rewards and finalize, so a void needs no undo.
         this.storeFor(req.siteId);
         return { op: 'cancel', status: 'ok', linkTxId: req.linkTxId };
+      case 'prices': {
+        const store = this.storeFor(req.siteId);
+        const at = this.clock().toISOString();
+        const updated = req.prices.filter((p) => noteFuelPrice(store, gradeFor(p.grade), p.pricePerGallonCents, p.at ?? at, 'pos')).length;
+        if (updated) this.repo.save();
+        return { op: 'prices', status: 'ok', updated };
+      }
     }
   }
 
@@ -181,11 +193,11 @@ export class PosLink {
   }
 
   /** Our category for a POS line: the items catalog first, then the department map, then the department name. */
-  categoryOf(line: LinkLine): string {
+  categoryOf(line: LinkLine, storeId?: string): string {
     const code = line.posCode?.replace(/\s/g, '');
     if (code) {
       const digits = code.replace(/\D/g, '');
-      const item = this.repo.data.items?.items.find((i) => i.sku === code || (digits && i.upc === digits));
+      const item = catalogFor(this.repo.data, storeId)?.items.find((i) => i.sku === code || (digits && i.upc === digits));
       if (item?.category) return item.category;
     }
     const dept = line.department?.trim() ?? '';
@@ -198,7 +210,7 @@ export class PosLink {
   transaction(sale: LinkSale, store: ConsoleStore): Transaction {
     if (!sale.linkTxId || Number.isNaN(Date.parse(sale.at))) throw new ConsoleError('The sale needs a linkTxId and a valid "at" time.');
     const p = localParts(sale.at);
-    const items: LineItem[] = sale.lines.map((l) => ({ sku: l.posCode || `line-${l.lineId}`, category: this.categoryOf(l), qty: l.qty, unitCents: l.unitCents }));
+    const items: LineItem[] = sale.lines.map((l) => ({ sku: l.posCode || `line-${l.lineId}`, category: this.categoryOf(l, store.id), qty: l.qty, unitCents: l.unitCents }));
     const fuel = sale.fuel && sale.fuel.gallons !== undefined && sale.fuel.gallons > 0
       ? { grade: gradeFor(sale.fuel.grade), gallons: sale.fuel.gallons, pricePerGallonCents: sale.fuel.pricePerGallonCents }
       : undefined;
@@ -219,7 +231,7 @@ export class PosLink {
     const e = this.repo.data.rules.find((r) => r.id === ruleId)?.effect;
     if (!e || (e.type !== 'itemDiscount' && e.type !== 'punchCard')) return undefined;
     if (!e.skus && !e.categories) return sale.lines.map((l) => l.lineId);
-    return sale.lines.filter((l) => (e.skus?.includes(l.posCode ?? '') ?? false) || (e.categories?.includes(this.categoryOf(l)) ?? false)).map((l) => l.lineId);
+    return sale.lines.filter((l) => (e.skus?.includes(l.posCode ?? '') ?? false) || (e.categories?.includes(this.categoryOf(l, this.storeFor(sale.siteId).id)) ?? false)).map((l) => l.lineId);
   }
 
   private label(ruleId: string, d: AppliedDiscount): string {
@@ -228,9 +240,15 @@ export class PosLink {
     return `VGO Rewards: ${(r?.headline || r?.name || 'reward').slice(0, 30)}`;
   }
 
+  /** Every fuel sale carries the pump price, which keeps the app's gas prices current. */
+  private notePrice(sale: LinkSale, store: ConsoleStore): boolean {
+    return !!sale.fuel && noteFuelPrice(store, gradeFor(sale.fuel.grade), sale.fuel.pricePerGallonCents, sale.at, 'pos');
+  }
+
   rewards(sale: LinkSale): LinkAnswer {
     const store = this.storeFor(sale.siteId);
     const tx = this.transaction(sale, store);
+    if (this.notePrice(sale, store)) this.repo.save();
     const none = { op: 'rewards' as const, linkTxId: sale.linkTxId, rewards: [], pointsToEarn: 0, receipt: [] };
     if (!sale.loyaltyId) return { ...none, status: 'non-member' };
     if (!store.loyaltyLive) return { ...none, status: 'not-live' };
@@ -260,6 +278,7 @@ export class PosLink {
   finalize(sale: LinkFinalize): LinkAnswer {
     const store = this.storeFor(sale.siteId);
     const tx = this.transaction(sale, store);
+    if (this.notePrice(sale, store)) this.repo.save();
     const base = { op: 'finalize' as const, linkTxId: sale.linkTxId };
     const done = this.repo.data.ledger.find((e) => e.tx.id === tx.id);
     if (done) {

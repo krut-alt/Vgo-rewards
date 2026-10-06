@@ -197,6 +197,9 @@ export class Repo {
     }
     // A new address with the old map spot left in place gets looked up again.
     const was = this.data.stores.find((s) => s.id === store.id);
+    // Gas prices change on their own (POS link, price editor), never through the location form.
+    delete store.fuelPrices;
+    if (was?.fuelPrices) store.fuelPrices = was.fuelPrices;
     if (was && store.lat === was.lat && store.lng === was.lng && (['address', 'city', 'state', 'zip'] as const).some((k) => (store[k] ?? '') !== (was[k] ?? ''))) {
       delete store.lat;
       delete store.lng;

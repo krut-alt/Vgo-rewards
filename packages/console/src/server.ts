@@ -1,7 +1,8 @@
 // Console API and web server. With an admin password set, the portal needs a sign-in and store
 // users only see their own locations; without one (local development) everyone is the admin.
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { extname, join, normalize, resolve } from 'node:path';
 import { inScope, type Actor, type RuleStatus, type Transaction } from '../../engine/src/index.js';
@@ -9,6 +10,7 @@ import { CATEGORIES, FUEL_GRADES } from './catalog.js';
 import { ruleChecks } from './checks.js';
 import { localParts } from './dates.js';
 import { DRAFT_EXAMPLES, draftRule } from './drafter.js';
+import { setFuelPricesByHand } from './fuel-prices.js';
 import {
   displayStatus,
   fundedLabel,
@@ -28,7 +30,7 @@ import { ConsoleError, Repo, withoutNulls, type RuleInput } from './repo.js';
 import { spotFrom } from './geo.js';
 import { storeSpotFiller, type Geocoder } from './geocode.js';
 import { mediaUrl, memoryMediaStore, readUpload, type MediaStore } from './media.js';
-import { parseItemsCsv, searchItems } from './items.js';
+import { addItemUpload, ALL_STORES, catalogFor, clearStoreItems, everyItem, parseItemsCsv, searchItems } from './items.js';
 import { computeResults } from './results.js';
 import { ADMIN } from './seed.js';
 import { STOCK_ART, pickStockArt, stockArtFor, stockArtUrl } from './stock-art.js';
@@ -46,7 +48,7 @@ const TYPES: Record<string, string> = {
 
 export function ruleView(repo: Repo, rule: ConsoleRule, now = new Date()) {
   const { stores, groups } = repo.data;
-  const stock = stockArtFor(rule, repo.data.items);
+  const stock = stockArtFor(rule, everyItem(repo.data));
   return {
     ...rule,
     display: {
@@ -61,7 +63,7 @@ export function ruleView(repo: Repo, rule: ConsoleRule, now = new Date()) {
       artKind: offerKind(rule),
       imageUrl: rule.artwork ? mediaUrl(rule.artwork.mediaId) : null,
       stockArt: stock ? { id: stock.id, title: stock.title, url: stockArtUrl(stock.id) } : null,
-      autoStockArt: pickStockArt(rule, repo.data.items).id,
+      autoStockArt: pickStockArt(rule, everyItem(repo.data)).id,
     },
   };
 }
@@ -238,6 +240,16 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
       void fillSpots?.();
       return [200, saved];
     }
+    // Gas prices shown in the app, typed in by hand. The POS link keeps them current once it is live.
+    if (method === 'PUT' && (match = m(/^\/stores\/([\w-]+)\/fuel-prices$/))) {
+      const store = myStores().find((s) => s.id === match![1]);
+      if (!store) throw new ConsoleError('Location not found.', 404);
+      const { prices } = await body<{ prices?: Record<string, unknown> }>(req);
+      setFuelPricesByHand(store, prices ?? {}, clock().toISOString());
+      repo.note(actor, `Updated gas prices at ${store.name}`);
+      repo.save();
+      return [200, store];
+    }
     if (method === 'POST' && (match = m(/^\/stores\/([\w-]+)\/live$/))) {
       const { live } = await body<{ live?: unknown }>(req);
       return [200, repo.setStoreLive(match[1]!, Boolean(live), actor)];
@@ -331,19 +343,60 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
       repo.save();
       return [200, { ok: true }];
     }
+    // Item lists (pricebooks). An upload goes to chosen stores or to all stores; a store with its own
+    // list uses it, the rest use the all-stores list. Every upload is kept in the history, with its file.
     if (method === 'GET' && path === '/items') {
       adminOnly();
-      const c = repo.data.items;
-      return [200, { ...searchItems(c, url.searchParams.get('q') ?? ''), count: c?.items.length ?? 0, uploadedAt: c?.uploadedAt ?? null, fileName: c?.fileName ?? null }];
+      const store = url.searchParams.get('store') || ALL_STORES;
+      if (store !== ALL_STORES) repo.store(store);
+      const d = repo.data;
+      const c = store === ALL_STORES ? catalogFor(d) : catalogFor(d, store);
+      const ownList = store !== ALL_STORES && !!d.currentItems?.[store];
+      const uploads = (d.itemUploads ?? [])
+        .filter((u) => store === ALL_STORES || !u.storeIds.length || u.storeIds.includes(store))
+        .map((u) => ({ ...u, current: Object.entries(d.currentItems ?? {}).filter(([, id]) => id === u.id).map(([k]) => k) }))
+        .reverse();
+      const storeLists = Object.entries(d.currentItems ?? {})
+        .filter(([k]) => k !== ALL_STORES)
+        .map(([storeId, id]) => ({ storeId, uploadedAt: d.itemLists?.[id]?.uploadedAt ?? null, count: d.itemLists?.[id]?.items.length ?? 0 }));
+      return [
+        200,
+        { ...searchItems(c, url.searchParams.get('q') ?? ''), store, ownList, count: c?.items.length ?? 0, uploadedAt: c?.uploadedAt || null, fileName: c?.fileName ?? null, uploads, storeLists },
+      ];
     }
     if (method === 'POST' && path === '/items/upload') {
       adminOnly();
-      const { csv, fileName } = await body<{ csv?: string; fileName?: string }>(req, 15_000_000);
-      const { items, skipped } = parseItemsCsv(String(csv ?? ''));
-      repo.data.items = { items, uploadedAt: clock().toISOString(), ...(fileName ? { fileName: String(fileName).slice(0, 120) } : {}) };
-      repo.note(actor, `Uploaded the items catalog (${items.length.toLocaleString()} items${fileName ? ` from ${fileName}` : ''})`);
+      const { csv, fileName, storeIds } = await body<{ csv?: string; fileName?: string; storeIds?: unknown }>(req, 15_000_000);
+      if (storeIds !== undefined && (!Array.isArray(storeIds) || storeIds.some((x) => typeof x !== 'string'))) throw new ConsoleError('Choose the stores as a list.');
+      const targets = [...new Set(storeIds as string[] | undefined)];
+      for (const id of targets) repo.store(id);
+      const text = String(csv ?? '');
+      const { items, skipped } = parseItemsCsv(text);
+      const id = `items-${randomUUID().slice(0, 12)}`;
+      const at = clock().toISOString();
+      const name = fileName ? String(fileName).slice(0, 120) : undefined;
+      // The original file is kept (zipped) beside the artwork, so any upload can be downloaded later.
+      const fileKept = await media.put(id, gzipSync(text)).then(() => true, (err) => (console.error('[items] could not keep the file:', err), false));
+      const upload = addItemUpload(repo.data, items, { id, fileName: name, storeIds: targets, at, by: who.user.id, skipped, fileKept });
+      const where = upload.storeIds.length ? upload.storeIds.map((s) => repo.store(s).name).join(', ') : 'all stores';
+      repo.note(actor, `Uploaded ${items.length.toLocaleString()} items for ${where}${name ? ` from ${name}` : ''}`);
       repo.save();
-      return [200, { count: items.length, skipped }];
+      return [200, { count: items.length, skipped, upload }];
+    }
+    if (method === 'GET' && (match = m(/^\/items\/uploads\/([\w-]+)\/file$/))) {
+      adminOnly();
+      const u = repo.data.itemUploads?.find((x) => x.id === match![1]);
+      const bytes = u?.fileKept ? await media.get(u.id) : undefined;
+      if (!u || !bytes) throw new ConsoleError('That file was not kept.', 404);
+      return [200, { fileName: u.fileName ?? `items-${u.uploadedAt.slice(0, 10)}.csv`, csv: gunzipSync(bytes).toString('utf8') }];
+    }
+    if (method === 'DELETE' && (match = m(/^\/items\/stores\/([\w-]+)$/))) {
+      adminOnly();
+      const store = repo.store(match[1]!);
+      clearStoreItems(repo.data, store.id);
+      repo.note(actor, `${store.name} now uses the all-stores item list`);
+      repo.save();
+      return [200, { ok: true }];
     }
     if (method === 'GET' && path === '/users') {
       adminOnly();
