@@ -357,6 +357,7 @@ export function createApp(repo: Repo, publicDir: string, options: AppOptions | (
     const path = url.pathname.replace(/^\/api\/app/, '');
     const method = req.method ?? 'GET';
     if (method === 'GET' && path === '/config') return [200, members.config()];
+    if (method === 'GET' && path === '/program') return [200, members.programFacts()];
     if (method === 'POST' && path === '/code') {
       const { phone } = await body<{ phone?: string }>(req);
       return [200, await members.requestCode(phone)];

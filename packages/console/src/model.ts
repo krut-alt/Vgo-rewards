@@ -106,6 +106,17 @@ export interface ProgramSettings {
   maxStoreDiscountCents: number;
   storeManagersCanCreate: boolean;
   monthlyBudgetCents: number;
+  /** Who runs the program, shown on the app's terms and privacy pages. */
+  legal?: ProgramContact;
+}
+
+export interface ProgramContact {
+  companyName?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  /** State whose laws govern the terms, two letters. */
+  governingState?: string;
 }
 
 /** A processed POS transaction and what the program gave on it. `memberId` is empty for non-members. */

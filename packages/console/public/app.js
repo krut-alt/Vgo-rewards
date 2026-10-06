@@ -1442,6 +1442,41 @@ function settingsSection() {
     h(
       'section',
       { class: 'card pad step' },
+      h('h2', {}, 'Terms and privacy contact'),
+      h(
+        'p',
+        { class: 'note' },
+        'Shown on the program terms and privacy policy in the app. The earn rates, rewards and point expiry on those pages update from your settings on their own. ',
+        h('a', { href: '/app/#/terms', target: '_blank' }, 'View terms'),
+        ' · ',
+        h('a', { href: '/app/#/privacy', target: '_blank' }, 'View privacy policy'),
+      ),
+      h(
+        'div',
+        { class: 'grid2' },
+        [
+          ['companyName', 'Company that runs the program', 'VGO', 'text'],
+          ['email', 'Contact email', 'rewards@yourcompany.com', 'email'],
+          ['phone', 'Contact phone (optional)', '', 'tel'],
+          ['address', 'Mailing address', 'Street, city, state ZIP', 'text'],
+          ['governingState', 'State law that governs the terms', 'SC', 'text'],
+        ].map(([key, label, placeholder, type]) =>
+          field(
+            label,
+            h('input', {
+              type,
+              maxlength: key === 'governingState' ? 2 : 200,
+              placeholder,
+              value: (settingsEdits.legal ?? s.legal ?? {})[key] ?? '',
+              oninput: (e) => setS({ legal: { ...(s.legal ?? {}), ...(settingsEdits.legal ?? {}), [key]: e.target.value } }),
+            }),
+          ),
+        ),
+      ),
+    ),
+    h(
+      'section',
+      { class: 'card pad step' },
       h('h2', {}, 'Branding'),
       h(
         'div',
