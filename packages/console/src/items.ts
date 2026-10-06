@@ -59,7 +59,7 @@ export function csvRows(text: string): string[][] {
   return rows;
 }
 
-function categoryFor(department: string): string | undefined {
+export function categoryFor(department: string): string | undefined {
   const d = department.toLowerCase().trim();
   if (!d) return undefined;
   return CATEGORIES.find((c) => c.label.toLowerCase() === d || c.id === d || (c.words as readonly string[]).some((w) => d === w || d.includes(w)))?.id;
